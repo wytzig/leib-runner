@@ -1,0 +1,445 @@
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.module.js';
+import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/loaders/DRACOLoader.js';
+import { ModelManager, MODEL_SCALES } from './model-manager.js';
+
+// Check if Three.js loaded
+if (typeof THREE === 'undefined') {
+  document.body.innerHTML = '<div style="color: white; padding: 20px; font-family: Arial;">ERROR: Three.js failed to load. Check your internet connection.</div>';
+  throw new Error('Three.js not loaded');
+}
+
+console.log('Three.js loaded successfully');
+
+// Scene setup
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87CEEB);
+scene.fog = new THREE.Fog(0x87CEEB, 10, 100);
+
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+console.log('Renderer created');
+
+// Lighting
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+scene.add(ambientLight);
+
+const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+directionalLight.position.set(5, 10, 5);
+scene.add(directionalLight);
+
+// Road (long white platform)
+const roadWidth = 19;
+const roadLength = 200;
+// Road segments for infinite scrolling
+const roadSegments = [];
+const segmentLength = 40;
+const segmentCount = 6;
+const roadSpeed = 0.2;
+const roadMaterial = new THREE.MeshStandardMaterial({
+  color: 0x50545A,
+  side: THREE.DoubleSide
+});
+
+for (let i = 0; i < segmentCount; i++) {
+  const segment = new THREE.Mesh(
+    new THREE.PlaneGeometry(roadWidth, segmentLength),
+    roadMaterial
+  );
+  segment.rotation.x = -Math.PI / 2;
+  segment.position.y = 0;
+  segment.position.z = -segmentLength / 2 + i * segmentLength;
+  scene.add(segment);
+  roadSegments.push(segment);
+
+  // Add yellow lines to each segment
+  segment.markings = [];
+  for (let j = 0; j < 4; j++) {
+    const marking = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.3, 3),
+      new THREE.MeshStandardMaterial({ color: 0xffff00 })
+    );
+    marking.rotation.x = -Math.PI / 2;
+    marking.position.set(0, 0.01, segment.position.z - segmentLength / 2 + j * 10);
+    scene.add(marking);
+    segment.markings.push(marking);
+  }
+}
+
+// Player container (empty Group that will hold the loaded model)
+const player = new THREE.Group();
+player.position.set(0, 1, 0);
+scene.add(player);
+
+// Initialize model manager and load player model
+const modelManager = new ModelManager();
+let modelLoaded = false;
+
+// Load the model (choose one: 'assets/leib.glb', 'assets/katinka.glb', or 'assets/marco.glb')
+modelManager.loadPlayerModel('assets/leib.glb', player, {
+  onProgress: (type, message, color) => {
+    console.log(message);
+  },
+  onLoaded: (type, message, color) => {
+    console.log(message);
+    modelLoaded = true;
+  },
+  onError: (type, message, color) => {
+    console.warn(message);
+    modelLoaded = true; // Continue anyway with fallback
+  }
+});
+
+// Player clones (for multiplication effect)
+const playerClones = [];
+
+// Goal posts system
+const goalPosts = [];
+const goalSpawnInterval = 8000; // 8 seconds
+let lastGoalSpawn = Date.now();
+
+function createGoalPost(x, z, color, multiplier) {
+  const post = new THREE.Group();
+
+  // Left pillar
+  const leftPillar = new THREE.Mesh(
+    new THREE.BoxGeometry(0.5, 4, 0.5),
+    new THREE.MeshStandardMaterial({ color: color, emissive: color, emissiveIntensity: 0.5 })
+  );
+  leftPillar.position.set(-3.5, 2, 0);
+  post.add(leftPillar);
+
+  // Right pillar
+  const rightPillar = new THREE.Mesh(
+    new THREE.BoxGeometry(0.5, 4, 0.5),
+    new THREE.MeshStandardMaterial({ color: color, emissive: color, emissiveIntensity: 0.5 })
+  );
+  rightPillar.position.set(3.5, 2, 0);
+  post.add(rightPillar);
+
+  // Top bar
+  const topBar = new THREE.Mesh(
+    new THREE.BoxGeometry(7.5, 0.5, 0.5),
+    new THREE.MeshStandardMaterial({ color: color, emissive: color, emissiveIntensity: 0.5 })
+  );
+  topBar.position.set(0, 4, 0);
+  post.add(topBar);
+
+  // Add text label
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  canvas.width = 256;
+  canvas.height = 128;
+
+  // Draw text
+  context.fillStyle = '#ffffff';
+  context.font = 'bold 80px Arial';
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillText('+' + multiplier, 128, 64);
+
+  // Create texture from canvas
+  const texture = new THREE.CanvasTexture(canvas);
+  const labelMaterial = new THREE.SpriteMaterial({ map: texture });
+  const label = new THREE.Sprite(labelMaterial);
+  label.scale.set(3, 1.5, 1);
+  label.position.set(0, 2.5, 0);
+  post.add(label);
+
+  post.position.set(x, 0, z);
+  post.userData.multiplier = multiplier;
+  post.userData.color = color;
+  post.userData.triggered = false;
+
+  scene.add(post);
+  return post;
+}
+
+function spawnGoalPosts() {
+  const spawnZ = player.position.z - 50; // Spawn 50 units ahead
+
+  // Blue goal on the left (+2)
+  const blueGoal = createGoalPost(-5, spawnZ, 0x0088ff, 2);
+  goalPosts.push(blueGoal);
+
+  // Green goal on the right (+4)
+  const greenGoal = createGoalPost(5, spawnZ, 0x00ff88, 4);
+  goalPosts.push(greenGoal);
+}
+
+console.log('Scene objects created');
+
+// Mouse look controls with pointer lock
+let cameraRotationX = 0;
+let cameraRotationY = 0;
+const mouseSensitivity = 0.002;
+
+// Request pointer lock on click
+document.addEventListener('click', () => {
+  document.body.requestPointerLock();
+});
+
+// Mouse movement when locked
+document.addEventListener('mousemove', (e) => {
+  if (document.pointerLockElement === document.body) {
+    cameraRotationY += e.movementX * mouseSensitivity;
+    cameraRotationX += e.movementY * mouseSensitivity;
+
+    // Limit vertical rotation
+    cameraRotationX = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, cameraRotationX));
+  }
+});
+
+// Game state
+let velocity = { x: 0, z: 0, y: 0 };
+let isJumping = false;
+let isDead = false;
+const moveSpeed = 0.15;
+const jumpForce = 0.3;
+const gravity = 0.015;
+const roadHalfWidth = roadWidth / 2;
+
+// Keyboard controls
+const keys = {};
+window.addEventListener('keydown', (e) => {
+  keys[e.key.toLowerCase()] = true;
+
+  // Restart on R key if dead
+  if (e.key.toLowerCase() === 'r' && isDead) {
+    location.reload();
+  }
+});
+window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+
+// Check if player is on the road
+function isOnRoad() {
+  return Math.abs(player.position.x) <= roadHalfWidth;
+}
+
+function checkGoalCollision() {
+  for (let goal of goalPosts) {
+    if (goal.userData.triggered) continue;
+
+    // Check if player has passed through the goal
+    const distanceX = Math.abs(player.position.x - goal.position.x);
+    const distanceZ = Math.abs(player.position.z - goal.position.z);
+
+    // Player is within goal width (4 units) and has crossed it
+    if (distanceX < 3 && distanceZ < 2) {
+      goal.userData.triggered = true;
+      multiplyPlayer(goal.userData.multiplier);
+
+      // Visual feedback - make goal flash
+      goal.children.forEach(child => {
+        child.material.emissiveIntensity = 1;
+        setTimeout(() => {
+          if (child.material) child.material.emissiveIntensity = 0.5;
+        }, 300);
+      });
+    }
+  }
+}
+
+function multiplyPlayer(multiplier) {
+  console.log('🎯 Multiplying player by', multiplier);
+  
+  // Add new clones by loading fresh model instances
+  for (let i = 0; i < multiplier; i++) {
+    const clone = new THREE.Group();
+    clone.position.copy(player.position);
+    scene.add(clone);
+    playerClones.push(clone);
+    
+    // Load a fresh instance of the model for this clone
+    if (modelLoaded && modelManager.playerModel) {
+      // Create a new ModelManager instance just for loading (we won't use its mixer)
+      const cloneLoader = new GLTFLoader();
+      const dracoLoader = new DRACOLoader();
+      dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+      cloneLoader.setDRACOLoader(dracoLoader);
+      
+      // Get the same URL that was used for the original model
+      const modelName = 'leib'; // This should match what you're loading
+      const quality = 'high';
+      const remoteUrl = `https://MaxTomahawk.github.io/leibgame-assets/assets/${modelName}_${quality}.glb`;
+      
+      cloneLoader.load(remoteUrl, (gltf) => {
+        const cloneModel = gltf.scene;
+        cloneModel.scale.set(1, 1, 1);
+        cloneModel.rotation.y = Math.PI;
+        cloneModel.position.y = -0.5;
+        clone.add(cloneModel);
+      });
+    } else {
+      // Fallback box
+      const fallbackGeo = new THREE.BoxGeometry(1, 2, 1);
+      const fallbackMat = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
+      const fallbackMesh = new THREE.Mesh(fallbackGeo, fallbackMat);
+      clone.add(fallbackMesh);
+    }
+  }
+
+  const totalClones = playerClones.length;
+  const clonesPerRing = 8;
+
+  for (let i = 0; i < totalClones; i++) {
+    const ringIndex = Math.floor(i / clonesPerRing);
+    const posInRing = i % clonesPerRing;
+    const clonesInThisRing = Math.min(clonesPerRing, totalClones - ringIndex * clonesPerRing);
+
+    const radius = 2.5 + ringIndex * 1.8;
+    const angle = (posInRing / clonesInThisRing) * Math.PI * 2;
+    const randomOffset = (Math.random() - 0.5) * 0.3;
+
+    playerClones[i].targetX = Math.cos(angle) * radius + randomOffset;
+    playerClones[i].targetZ = Math.sin(angle) * radius + randomOffset;
+  }
+
+  const totalCubes = 1 + playerClones.length;
+  document.getElementById('ui').innerHTML = `<div style="font-size: 24px;">Characters: ${totalCubes}</div>`;
+}
+
+
+
+// Game loop
+function animate() {
+  requestAnimationFrame(animate);
+
+  // Spawn goal posts periodically
+  if (Date.now() - lastGoalSpawn > goalSpawnInterval) {
+    spawnGoalPosts();
+    lastGoalSpawn = Date.now();
+  }
+
+  // Move road segments backward (creating forward motion)
+  for (let segment of roadSegments) {
+    segment.position.z += roadSpeed;
+
+    // Move markings with segment
+    if (segment.markings) {
+      for (let marking of segment.markings) {
+        marking.position.z += roadSpeed;
+      }
+    }
+
+    // Recycle segment when it goes behind camera
+    if (segment.position.z > camera.position.z + segmentLength * 2) {
+      segment.position.z -= segmentLength * segmentCount;
+
+      // Move markings too
+      if (segment.markings) {
+        for (let marking of segment.markings) {
+          marking.position.z -= segmentLength * segmentCount;
+        }
+      }
+    }
+  }
+
+  if (isDead) return;
+
+  // Update model animations
+if (modelLoaded && modelManager.mixer) {
+  const delta = 0.016; // Approximately 60fps
+  modelManager.update(delta);
+  
+  // Determine animation state
+  const isMoving = velocity.x !== 0 || velocity.z !== 0;
+  const isSprinting = keys['shift'];
+  
+  modelManager.updateAnimation({
+    isMoving: isMoving,
+    isGrounded: player.position.y <= 0.5,
+    isSprinting: isSprinting,
+    verticalVelocity: velocity.y,
+    isGliding: false,
+    localVelocity: { x: velocity.x, z: velocity.z }
+  });
+}
+
+  // Check goal collisions
+  checkGoalCollision();
+
+  // Update goal posts (move with road)
+  for (let i = goalPosts.length - 1; i >= 0; i--) {
+    const goal = goalPosts[i];
+    goal.position.z += roadSpeed;
+
+    // Remove goals that are far behind
+    if (goal.position.z > player.position.z + 20) {
+      scene.remove(goal);
+      goalPosts.splice(i, 1);
+    }
+  }
+
+  // Update player clones to follow in circle formation
+  for (let i = 0; i < playerClones.length; i++) {
+    const clone = playerClones[i];
+
+    // Target position relative to player
+    const targetX = player.position.x + clone.targetX;
+    const targetZ = player.position.z + clone.targetZ;
+    const targetY = player.position.y;
+
+    // Smoothly move to target position
+    clone.position.x += (targetX - clone.position.x) * 0.15;
+    clone.position.y += (targetY - clone.position.y) * 0.15;
+    clone.position.z += (targetZ - clone.position.z) * 0.15;
+  }
+
+  // Movement
+  velocity.x = 0;
+  velocity.z = 0;
+
+  if (keys['w']) velocity.z = -moveSpeed;
+  if (keys['s']) velocity.z = moveSpeed;
+  if (keys['a']) velocity.x = -moveSpeed;
+  if (keys['d']) velocity.x = moveSpeed;
+
+  // Jump
+  if (keys[' '] && !isJumping && player.position.y <= 0.5) {
+    velocity.y = jumpForce;
+    isJumping = true;
+  }
+
+  // Apply gravity
+  velocity.y -= gravity;
+  player.position.y += velocity.y;
+
+  // Apply movement
+  player.position.x += velocity.x;
+  player.position.z += velocity.z;
+
+  // Check if on road
+  if (!isOnRoad() && player.position.y <= 0.5) {
+    // Start falling
+    velocity.y = -0.1;
+  }
+
+  // Ground collision (only if on road)
+  if (player.position.y <= 0.5 && isOnRoad()) {
+    player.position.y = 0.5;
+    velocity.y = 0;
+    isJumping = false;
+  }
+
+  // Death (fell below ground)
+  if (player.position.y < -5) {
+    isDead = true;
+    document.getElementById('ui').innerHTML = '<div style="font-size: 30px; color: red;">YOU DIED!</div><div style="font-size: 18px; margin-top: 10px;">Press R to restart</div>';
+  }
+
+  // Camera follows player with FPS-style rotation
+  const cameraDistance = 10;
+  camera.position.x = player.position.x + Math.sin(cameraRotationY) * cameraDistance * Math.cos(cameraRotationX);
+  camera.position.y = player.position.y + 5 + Math.sin(cameraRotationX) * cameraDistance;
+  camera.position.z = player.position.z + Math.cos(cameraRotationY) * cameraDistance * Math.cos(cameraRotationX);
+  camera.lookAt(player.position.x, player.position.y, player.position.z);
+
+  renderer.render(scene, camera);
+}
+
+console.log('Starting animation loop');
+animate();
