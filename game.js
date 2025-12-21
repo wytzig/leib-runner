@@ -2,6 +2,8 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.m
 import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/loaders/DRACOLoader.js';
 import { ModelManager, MODEL_SCALES } from './model-manager.js';
+import { SkeletonUtils } from 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/utils/SkeletonUtils.js';
+
 
 // Check if Three.js loaded
 if (typeof THREE === 'undefined') {
@@ -95,6 +97,7 @@ modelManager.loadPlayerModel('assets/leib.glb', player, {
 
 // Player clones (for multiplication effect)
 const playerClones = [];
+const cloneMixers = [];
 
 // Goal posts system
 const goalPosts = [];
@@ -245,34 +248,33 @@ function checkGoalCollision() {
 
 function multiplyPlayer(multiplier) {
   console.log('🎯 Multiplying player by', multiplier);
-  
+
   // Add new clones by loading fresh model instances
   for (let i = 0; i < multiplier; i++) {
     const clone = new THREE.Group();
     clone.position.copy(player.position);
     scene.add(clone);
     playerClones.push(clone);
-    
+
     // Load a fresh instance of the model for this clone
     if (modelLoaded && modelManager.playerModel) {
-      // Create a new ModelManager instance just for loading (we won't use its mixer)
-      const cloneLoader = new GLTFLoader();
-      const dracoLoader = new DRACOLoader();
-      dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
-      cloneLoader.setDRACOLoader(dracoLoader);
+      const cloneModel = SkeletonUtils.clone(modelManager.playerModel);
+      cloneModel.scale.set(1, 1, 1);
+      cloneModel.position.y = -0.5;
+      clone.add(cloneModel);
+
+      const mixer = new THREE.AnimationMixer(cloneModel);
+
+      const idleClip = modelManager.animationClips.find(c =>
+        c.name.toLowerCase().includes('run')
+      ) || modelManager.animationClips[0];
+
+      const action = mixer.clipAction(idleClip);
+      action.reset();
+      action.play();
       
-      // Get the same URL that was used for the original model
-      const modelName = 'leib'; // This should match what you're loading
-      const quality = 'high';
-      const remoteUrl = `https://MaxTomahawk.github.io/leibgame-assets/assets/${modelName}_${quality}.glb`;
-      
-      cloneLoader.load(remoteUrl, (gltf) => {
-        const cloneModel = gltf.scene;
-        cloneModel.scale.set(1, 1, 1);
-        cloneModel.rotation.y = Math.PI;
-        cloneModel.position.y = -0.5;
-        clone.add(cloneModel);
-      });
+      clone.userData.mixer = mixer;
+      cloneMixers.push(mixer);
     } else {
       // Fallback box
       const fallbackGeo = new THREE.BoxGeometry(1, 2, 1);
@@ -308,6 +310,13 @@ function multiplyPlayer(multiplier) {
 function animate() {
   requestAnimationFrame(animate);
 
+  const delta = 0.016;
+
+  // move all playerclones
+  for (const mixer of cloneMixers) {
+    mixer.update(delta);
+  }
+
   // Spawn goal posts periodically
   if (Date.now() - lastGoalSpawn > goalSpawnInterval) {
     spawnGoalPosts();
@@ -341,23 +350,23 @@ function animate() {
   if (isDead) return;
 
   // Update model animations
-if (modelLoaded && modelManager.mixer) {
-  const delta = 0.016; // Approximately 60fps
-  modelManager.update(delta);
-  
-  // Determine animation state
-  const isMoving = velocity.x !== 0 || velocity.z !== 0;
-  const isSprinting = keys['shift'];
-  
-  modelManager.updateAnimation({
-    isMoving: isMoving,
-    isGrounded: player.position.y <= 0.5,
-    isSprinting: isSprinting,
-    verticalVelocity: velocity.y,
-    isGliding: false,
-    localVelocity: { x: velocity.x, z: velocity.z }
-  });
-}
+  if (modelLoaded && modelManager.mixer) {
+    const delta = 0.016; // Approximately 60fps
+    modelManager.update(delta);
+
+    // Determine animation state
+    const isMoving = velocity.x !== 0 || velocity.z !== 0;
+    const isSprinting = keys['shift'];
+
+    modelManager.updateAnimation({
+      isMoving: isMoving,
+      isGrounded: player.position.y <= 0.5,
+      isSprinting: isSprinting,
+      verticalVelocity: velocity.y,
+      isGliding: false,
+      localVelocity: { x: velocity.x, z: velocity.z }
+    });
+  }
 
   // Check goal collisions
   checkGoalCollision();

@@ -52,6 +52,7 @@ export class ModelManager {
                 remoteUrl,
                 (gltf) => {
                     this.playerModel = gltf.scene;
+                    this.animationClips = gltf.animations;
 
                     const scale = MODEL_SCALES[modelFile] || 1;
                     this.playerModel.scale.set(scale, scale, scale);
