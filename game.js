@@ -310,6 +310,10 @@ window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
 function isOnRoad() {
   return Math.abs(player.position.x) <= roadHalfWidth;
 }
+// check if the position is on the road or not
+function isPositionOnRoad(x) {
+  return Math.abs(x) <= roadHalfWidth;
+}
 
 function checkGoalCollision() {
   for (let goal of goalPosts) {
@@ -352,6 +356,9 @@ function multiplyPlayer(multiplier) {
       cloneModel.position.y = -0.5;
       clone.add(cloneModel);
 
+      clone.userData.isFalling = false;
+      clone.userData.fallSpeed = 0;
+
       const mixer = new THREE.AnimationMixer(cloneModel);
 
       // Store the mixer and setup animations for this clone
@@ -381,6 +388,8 @@ function multiplyPlayer(multiplier) {
       const fallbackMat = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
       const fallbackMesh = new THREE.Mesh(fallbackGeo, fallbackMat);
       clone.add(fallbackMesh);
+      clone.userData.isFalling = false;
+      clone.userData.fallSpeed = 0;
     }
   }
 
@@ -527,8 +536,35 @@ function animate() {
   }
 
   // Update player clones to follow in circle formation
-  for (let i = 0; i < playerClones.length; i++) {
+  for (let i = playerClones.length - 1; i >= 0; i--) {
     const clone = playerClones[i];
+
+    // Check if clone is falling
+    if (clone.userData.isFalling) {
+      // Apply gravity
+      clone.userData.fallSpeed += gravity;
+      clone.position.y -= clone.userData.fallSpeed;
+
+      // Remove clone if it falls too far
+      if (clone.position.y < -10) {
+        scene.remove(clone);
+
+        // Remove mixer if exists
+        const mixerIndex = cloneMixers.indexOf(clone.userData.mixer);
+        if (mixerIndex > -1) {
+          cloneMixers.splice(mixerIndex, 1);
+        }
+
+        playerClones.splice(i, 1);
+
+        // Update UI
+        const totalCubes = 1 + playerClones.length;
+        document.getElementById('ui').innerHTML = `<div style="font-size: 24px;">Characters: ${totalCubes}</div>`;
+
+        console.log('💀 Clone fell off! Remaining:', playerClones.length);
+      }
+      continue; // Skip normal movement for falling clones
+    }
 
     // Target position relative to player
     const targetX = player.position.x + clone.targetX;
@@ -539,8 +575,14 @@ function animate() {
     clone.position.x += (targetX - clone.position.x) * 0.15;
     clone.position.y += (targetY - clone.position.y) * 0.15;
     clone.position.z += (targetZ - clone.position.z) * 0.15;
-  }
 
+    // Check if clone is off the road and on the ground
+    if (!isPositionOnRoad(clone.position.x) && clone.position.y <= 0.6) {
+      clone.userData.isFalling = true;
+      clone.userData.fallSpeed = 0.05; // Start with a small initial fall speed
+      console.log('⚠️ Clone is off road and starting to fall!');
+    }
+  }
   // Movement
   velocity.x = 0;
   velocity.z = 0;
