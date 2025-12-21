@@ -303,7 +303,7 @@ function multiplyPlayer(multiplier) {
     const posInRing = i % clonesPerRing;
     const clonesInThisRing = Math.min(clonesPerRing, totalClones - ringIndex * clonesPerRing);
 
-    const radius = 2.5 + ringIndex * 1.8;
+    const radius = 1.5 + ringIndex * 1.0;
     const angle = (posInRing / clonesInThisRing) * Math.PI * 2;
     const randomOffset = (Math.random() - 0.5) * 0.3;
 
