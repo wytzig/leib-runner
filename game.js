@@ -4,7 +4,6 @@ import { DRACOLoader } from 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples
 import { ModelManager, MODEL_SCALES } from './model-manager.js';
 import { SkeletonUtils } from 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/utils/SkeletonUtils.js';
 
-
 // Check if Three.js loaded
 if (typeof THREE === 'undefined') {
   document.body.innerHTML = '<div style="color: white; padding: 20px; font-family: Arial;">ERROR: Three.js failed to load. Check your internet connection.</div>';
@@ -24,6 +23,12 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
 console.log('Renderer created');
+
+// Fireball system
+const projectiles = [];
+let flameTexture;
+let flameMaterial;
+const CAST_DELAY = 200; // Match animation timing
 
 // Lighting
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
@@ -94,6 +99,8 @@ modelManager.loadPlayerModel('assets/leib.glb', player, {
     modelLoaded = true; // Continue anyway with fallback
   }
 });
+
+initFireballAssets();
 
 // Player clones (for multiplication effect)
 const playerClones = [];
@@ -173,6 +180,69 @@ function spawnGoalPosts() {
   goalPosts.push(greenGoal);
 }
 
+function initFireballAssets() {
+  const ASSET_BASE_URL = 'https://MaxTomahawk.github.io/leibgame-assets/assets/';
+
+  // Load flame sprite texture ONCE
+  flameTexture = new THREE.TextureLoader().load(`${ASSET_BASE_URL}fire.png`);
+  flameTexture.encoding = THREE.sRGBEncoding;
+
+  flameMaterial = new THREE.SpriteMaterial({
+    map: flameTexture,
+    transparent: true,
+    opacity: 1.0,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    color: 0xff3300
+  });
+}
+
+function performShoot(shooterPosition, shooterIsPlayer = true) {
+  // Cooldown check for player only
+  if (shooterIsPlayer && modelManager.isAttacking) return;
+
+  const triggered = shooterIsPlayer ? modelManager.triggerThrowAnimation() : true;
+
+  if (triggered) {
+    setTimeout(() => {
+      if (isDead) return;
+
+      const fireball = new THREE.Object3D();
+
+      // Add two overlapping flame sprites
+      for (let i = 0; i < 2; i++) {
+        const sprite = new THREE.Sprite(flameMaterial.clone());
+        sprite.scale.set(0.5 + Math.random() * 0.3, 0.5 + Math.random() * 0.3, 1);
+        sprite.position.set(0, 0, 0);
+        fireball.add(sprite);
+      }
+
+      // Spawn position
+      let spawnPos;
+      if (shooterIsPlayer) {
+        spawnPos = modelManager.getProjectileSpawnPosition(player.position);
+      } else {
+        // For clones, spawn at their position + offset
+        spawnPos = shooterPosition.clone();
+        spawnPos.y += 1.5; // Chest height
+      }
+
+      fireball.position.copy(spawnPos);
+      scene.add(fireball);
+
+      // Direction - always shoot forward based on camera
+      let dir = new THREE.Vector3(0, 0, -1);
+
+      projectiles.push({
+        mesh: fireball,
+        velocity: dir.multiplyScalar(30),
+        life: 2.0
+      });
+
+    }, shooterIsPlayer ? CAST_DELAY : 0); // Clones shoot instantly, player waits for animation
+  }
+}
+
 console.log('Scene objects created');
 
 // Mouse look controls with pointer lock
@@ -195,6 +265,25 @@ document.addEventListener('mousemove', (e) => {
     cameraRotationX = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, cameraRotationX));
   }
 });
+
+// Mouse shooting
+document.addEventListener('mousedown', (e) => {
+  if (isDead) return;
+
+  // Left mouse button = Shoot
+  if (e.button === 0) {
+    // Player shoots
+    performShoot(player.position, true);
+
+    // All clones shoot too
+    for (const clone of playerClones) {
+      performShoot(clone.position, false);
+    }
+  }
+});
+
+// Prevent right-click context menu
+document.addEventListener('contextmenu', (e) => e.preventDefault());
 
 // Game state
 let velocity = { x: 0, z: 0, y: 0 };
@@ -380,24 +469,47 @@ function animate() {
   }
 
   // Sync clone animations with player
-const currentPlayerAnim = modelManager.currentAnimation;
-for (const clone of playerClones) {
-  if (clone.userData.animations && currentPlayerAnim) {
-    const cloneAction = clone.userData.animations[currentPlayerAnim];
-    
-    if (cloneAction && !cloneAction.isRunning()) {
-      // Stop all other animations
-      for (const anim in clone.userData.animations) {
-        if (anim !== currentPlayerAnim) {
-          clone.userData.animations[anim].stop();
+  const currentPlayerAnim = modelManager.currentAnimation;
+  for (const clone of playerClones) {
+    if (clone.userData.animations && currentPlayerAnim) {
+      const cloneAction = clone.userData.animations[currentPlayerAnim];
+
+      if (cloneAction && !cloneAction.isRunning()) {
+        // Stop all other animations
+        for (const anim in clone.userData.animations) {
+          if (anim !== currentPlayerAnim) {
+            clone.userData.animations[anim].stop();
+          }
         }
+        // Play the matching animation
+        cloneAction.reset();
+        cloneAction.play();
       }
-      // Play the matching animation
-      cloneAction.reset();
-      cloneAction.play();
     }
   }
-}
+
+  // Update projectiles
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    const proj = projectiles[i];
+
+    proj.mesh.position.add(proj.velocity.clone().multiplyScalar(delta));
+    proj.life -= delta;
+
+    // Animate the flame sprites
+    proj.mesh.children.forEach(sprite => {
+      sprite.rotation.z += 0.1;
+      sprite.material.opacity = proj.life / 2.0; // Fade out
+    });
+
+    // Remove old projectiles
+    if (proj.life <= 0) {
+      scene.remove(proj.mesh);
+      proj.mesh.children.forEach(child => {
+        if (child.material) child.material.dispose();
+      });
+      projectiles.splice(i, 1);
+    }
+  }
 
   // Check goal collisions
   checkGoalCollision();
