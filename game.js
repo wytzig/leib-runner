@@ -265,15 +265,26 @@ function multiplyPlayer(multiplier) {
 
       const mixer = new THREE.AnimationMixer(cloneModel);
 
-      const idleClip = modelManager.animationClips.find(c =>
-        c.name.toLowerCase().includes('run')
-      ) || modelManager.animationClips[0];
-
-      const action = mixer.clipAction(idleClip);
-      action.reset();
-      action.play();
-      
+      // Store the mixer and setup animations for this clone
       clone.userData.mixer = mixer;
+      clone.userData.animations = {};
+
+      // Create all animation actions for the clone
+      modelManager.animationClips.forEach((clip) => {
+        let cleanName = clip.name;
+        if (cleanName.includes('|')) cleanName = cleanName.split('|').pop();
+        cleanName = cleanName.split('.')[0];
+
+        const action = mixer.clipAction(clip);
+        action.setLoop(THREE.LoopRepeat);
+        clone.userData.animations[cleanName] = action;
+      });
+
+      // Start with idle animation
+      if (clone.userData.animations['idle']) {
+        clone.userData.animations['idle'].play();
+      }
+
       cloneMixers.push(mixer);
     } else {
       // Fallback box
@@ -367,6 +378,26 @@ function animate() {
       localVelocity: { x: velocity.x, z: velocity.z }
     });
   }
+
+  // Sync clone animations with player
+const currentPlayerAnim = modelManager.currentAnimation;
+for (const clone of playerClones) {
+  if (clone.userData.animations && currentPlayerAnim) {
+    const cloneAction = clone.userData.animations[currentPlayerAnim];
+    
+    if (cloneAction && !cloneAction.isRunning()) {
+      // Stop all other animations
+      for (const anim in clone.userData.animations) {
+        if (anim !== currentPlayerAnim) {
+          clone.userData.animations[anim].stop();
+        }
+      }
+      // Play the matching animation
+      cloneAction.reset();
+      cloneAction.play();
+    }
+  }
+}
 
   // Check goal collisions
   checkGoalCollision();

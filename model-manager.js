@@ -219,7 +219,7 @@ export class ModelManager {
         // Let op: we hebben de "if (isAttacking) return" hier verwijderd.
         // We willen dat de benen ALTIJD geüpdatet worden naar Idle/Run/Walk.
 
-        let nextAnim = 'idle';
+        let nextAnim = 'run';
 
         if (isGliding && !isGrounded) {
             nextAnim = 'glide';
@@ -254,7 +254,7 @@ export class ModelManager {
             }
         }
         else {
-            nextAnim = 'idle';
+            nextAnim = 'run';
         }
 
         if (nextAnim !== this.currentAnimation) {
