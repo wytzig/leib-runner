@@ -85,7 +85,7 @@ scene.add(player);
 const modelManager = new ModelManager();
 let modelLoaded = false;
 
-// Load the model (choose one: 'assets/leib.glb', 'assets/katinka.glb', or 'assets/marco.glb')
+// Load the model (choose one: 'assets/leib.glb', 'assets/katinka.glb', 'assets/marco.glb' or 'assets/enemy.glb')
 modelManager.loadPlayerModel('assets/leib.glb', player, {
   onProgress: (type, message, color) => {
     console.log(message);
