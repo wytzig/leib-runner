@@ -129,6 +129,12 @@ const goalPosts = [];
 const goalSpawnInterval = 8000; // 8 seconds
 let lastGoalSpawn = Date.now();
 
+// Turrets
+const turrets = [];
+const enemyProjectiles = [];
+const TURRET_HEALTH = 20;
+const TURRET_FIRE_RATE = 3000; // ms
+
 function createGoalPost(x, z, color, multiplier, label) {
   const post = new THREE.Group();
 
@@ -184,6 +190,58 @@ function createGoalPost(x, z, color, multiplier, label) {
 
   scene.add(post);
   return post;
+}
+
+function createTurret(x, z) {
+  const group = new THREE.Group();
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0x888880 });
+  const darkMat  = new THREE.MeshStandardMaterial({ color: 0x555550 });
+
+  const addBox = (geo, mat, x, y, z) => {
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x, y, z);
+    group.add(mesh);
+    return mesh;
+  };
+
+  // Foundation slab
+  addBox(new THREE.BoxGeometry(3, 0.4, 3), darkMat, 0, 0.2, 0);
+
+  // Main tower shaft
+  addBox(new THREE.BoxGeometry(1.6, 4.5, 1.6), stoneMat, 0, 2.65, 0);
+
+  // Watch room (wider platform on top)
+  addBox(new THREE.BoxGeometry(2.8, 1.2, 2.8), stoneMat, 0, 5.5, 0);
+
+  // Floor of watch room (dark inset)
+  addBox(new THREE.BoxGeometry(2.4, 0.1, 2.4), darkMat, 0, 4.95, 0);
+
+  // Battlements — 4 corner merlons
+  const merlon = new THREE.BoxGeometry(0.55, 0.8, 0.55);
+  [[-1, -1], [-1, 1], [1, -1], [1, 1]].forEach(([mx, mz]) => {
+    addBox(merlon, stoneMat, mx * 1.0, 6.7, mz * 1.0);
+  });
+
+  // Cannon orb (sits in centre of watch room)
+  const cannon = new THREE.Mesh(
+    new THREE.SphereGeometry(0.3, 8, 8),
+    new THREE.MeshStandardMaterial({ color: 0xff2200, emissive: 0xff2200, emissiveIntensity: 1.8 })
+  );
+  cannon.position.y = 5.55;
+  group.add(cannon);
+
+  group.position.set(x, 0, z);
+  group.userData.health = TURRET_HEALTH;
+  group.userData.lastShot = Date.now() + 1500;
+  group.userData.cannon = cannon;
+
+  scene.add(group);
+  return group;
+}
+
+function spawnTurrets(z) {
+  turrets.push(createTurret(-9, z));
+  turrets.push(createTurret(9, z));
 }
 
 function randomGoalValue() {
@@ -542,9 +600,10 @@ function animate() {
     mixer.update(delta);
   }
 
-  // Spawn goal posts periodically
+  // Spawn goal posts and turrets periodically (turrets offset 25 units behind goal posts)
   if (Date.now() - lastGoalSpawn > goalSpawnInterval) {
     spawnGoalPosts();
+    spawnTurrets(player.position.z - 75);
     lastGoalSpawn = Date.now();
   }
 
@@ -682,6 +741,122 @@ function animate() {
     if (orb.position.z > player.position.z + 20) {
       scene.remove(orb);
       powerUps.splice(i, 1);
+    }
+  }
+
+  // Update turrets
+  const now = Date.now();
+  for (let i = turrets.length - 1; i >= 0; i--) {
+    const turret = turrets[i];
+    turret.position.z += roadSpeed;
+
+    // Remove if behind player
+    if (turret.position.z > player.position.z + 20) {
+      scene.remove(turret);
+      turrets.splice(i, 1);
+      continue;
+    }
+
+    // Check hits from player projectiles
+    for (let j = projectiles.length - 1; j >= 0; j--) {
+      const proj = projectiles[j];
+      const dx = proj.mesh.position.x - turret.position.x;
+      const dy = proj.mesh.position.y - (turret.position.y + 5.2);
+      const dz = proj.mesh.position.z - turret.position.z;
+      if (Math.sqrt(dx*dx + dy*dy + dz*dz) < 1.0) {
+        turret.userData.health--;
+        scene.remove(proj.mesh);
+        projectiles.splice(j, 1);
+
+        // Flash cannon red on hit
+        turret.userData.cannon.material.emissiveIntensity = 3;
+        setTimeout(() => {
+          if (turret.userData.cannon.material) turret.userData.cannon.material.emissiveIntensity = 1.5;
+        }, 100);
+
+        if (turret.userData.health <= 0) {
+          scene.remove(turret);
+          turrets.splice(i, 1);
+          break;
+        }
+      }
+    }
+
+    if (!turrets[i]) continue; // was destroyed above
+
+    // Fire at player
+    if (now - turret.userData.lastShot > TURRET_FIRE_RATE) {
+      turret.userData.lastShot = now;
+
+      const fb = new THREE.Mesh(
+        new THREE.SphereGeometry(0.25, 6, 6),
+        new THREE.MeshStandardMaterial({ color: 0xffcc00, emissive: 0xff8800, emissiveIntensity: 2 })
+      );
+      const cannonWorld = new THREE.Vector3();
+      turret.userData.cannon.getWorldPosition(cannonWorld);
+      fb.position.copy(cannonWorld);
+      scene.add(fb);
+
+      const dir = new THREE.Vector3().subVectors(player.position, cannonWorld).normalize();
+      dir.x += (Math.random() - 0.5) * 0.5;
+      dir.y += (Math.random() - 0.5) * 0.25;
+      dir.normalize();
+      enemyProjectiles.push({ mesh: fb, velocity: dir.multiplyScalar(12), life: 4.0 });
+    }
+  }
+
+  // Update enemy projectiles
+  for (let i = enemyProjectiles.length - 1; i >= 0; i--) {
+    const proj = enemyProjectiles[i];
+    proj.mesh.position.add(proj.velocity.clone().multiplyScalar(delta));
+    proj.life -= delta;
+
+    if (proj.life <= 0) {
+      scene.remove(proj.mesh);
+      enemyProjectiles.splice(i, 1);
+      continue;
+    }
+
+    // Check hit against each clone individually
+    let hit = false;
+    for (let j = playerClones.length - 1; j >= 0; j--) {
+      const clone = playerClones[j];
+      const dx = proj.mesh.position.x - clone.position.x;
+      const dy = proj.mesh.position.y - clone.position.y;
+      const dz = proj.mesh.position.z - clone.position.z;
+      if (Math.sqrt(dx*dx + dy*dy + dz*dz) < 1.0) {
+        // Remove this specific clone
+        scene.remove(clone);
+        const mixerIndex = cloneMixers.indexOf(clone.userData.mixer);
+        if (mixerIndex > -1) cloneMixers.splice(mixerIndex, 1);
+        playerClones.splice(j, 1);
+        updatePowerUiLabel();
+        scene.remove(proj.mesh);
+        enemyProjectiles.splice(i, 1);
+        hit = true;
+        break;
+      }
+    }
+    if (hit) continue;
+
+    // Check hit against main player
+    const pdx = proj.mesh.position.x - player.position.x;
+    const pdy = proj.mesh.position.y - player.position.y;
+    const pdz = proj.mesh.position.z - player.position.z;
+    if (Math.sqrt(pdx*pdx + pdy*pdy + pdz*pdz) < 1.0) {
+      scene.remove(proj.mesh);
+      enemyProjectiles.splice(i, 1);
+      if (playerClones.length > 0) {
+        // Absorb the hit with a clone
+        const clone = playerClones.pop();
+        scene.remove(clone);
+        const mixerIndex = cloneMixers.indexOf(clone.userData.mixer);
+        if (mixerIndex > -1) cloneMixers.splice(mixerIndex, 1);
+        updatePowerUiLabel();
+      } else {
+        isDead = true;
+        document.getElementById('ui').innerHTML = '<div style="font-size: 30px; color: red;">YOU DIED!</div><div style="font-size: 18px; margin-top: 10px;">Press R to restart</div>';
+      }
     }
   }
 
