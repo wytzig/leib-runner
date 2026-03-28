@@ -105,10 +105,20 @@ initFireballAssets();
 // Fireball power level
 let fireballPower = 1;
 
+// Shoot speed (ms between volleys for the whole group)
+let shootInterval = 600;
+let lastShootTime = 0;
+let speedLevel = 1;
+
 // Power-up items
 const powerUps = [];
 const powerUpSpawnInterval = 5000;
 let lastPowerUpSpawn = Date.now();
+
+// Speed power-ups
+const speedPowerUps = [];
+const speedPowerUpSpawnInterval = 7000;
+let lastSpeedPowerUpSpawn = Date.now();
 
 // Player clones (for multiplication effect)
 const playerClones = [];
@@ -226,12 +236,38 @@ function spawnPowerUp() {
   powerUps.push(createPowerUp(x, spawnZ));
 }
 
+function createSpeedPowerUp(x, z) {
+  const orb = new THREE.Group();
+
+  const geo = new THREE.SphereGeometry(0.4, 12, 12);
+  const mat = new THREE.MeshStandardMaterial({ color: 0x0088ff, emissive: 0x0044ff, emissiveIntensity: 1.5 });
+  const mesh = new THREE.Mesh(geo, mat);
+  orb.add(mesh);
+
+  const ringGeo = new THREE.TorusGeometry(0.6, 0.08, 8, 24);
+  const ringMat = new THREE.MeshStandardMaterial({ color: 0x44ddff, emissive: 0x44ddff, emissiveIntensity: 2 });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  orb.add(ring);
+
+  orb.position.set(x, 1.2, z);
+  scene.add(orb);
+  return orb;
+}
+
+function spawnSpeedPowerUp() {
+  const spawnZ = player.position.z - 50;
+  const x = (Math.random() * (roadWidth - 2)) - (roadWidth / 2 - 1);
+  speedPowerUps.push(createSpeedPowerUp(x, spawnZ));
+}
+
 function updatePowerUiLabel() {
   const ui = document.getElementById('ui');
   const charDiv = ui.querySelector('.char-count');
   const powerDiv = ui.querySelector('.power-level');
+  const speedDiv = ui.querySelector('.speed-level');
   if (charDiv) charDiv.textContent = `Characters: ${1 + playerClones.length}`;
   if (powerDiv) powerDiv.textContent = `Power: ${fireballPower}`;
+  if (speedDiv) speedDiv.textContent = `Speed: ${speedLevel}`;
 }
 
 // Tier 1: power 1-7  (orange), Tier 2: power 8-22 (blue), Tier 3: power 23+ (purple)
@@ -337,10 +373,11 @@ document.addEventListener('mousedown', (e) => {
 
   // Left mouse button = Shoot
   if (e.button === 0) {
-    // Player shoots
-    performShoot(player.position, true);
+    const now = Date.now();
+    if (now - lastShootTime < shootInterval) return;
+    lastShootTime = now;
 
-    // All clones shoot too
+    performShoot(player.position, true);
     for (const clone of playerClones) {
       performShoot(clone.position, false);
     }
@@ -645,6 +682,39 @@ function animate() {
     if (orb.position.z > player.position.z + 20) {
       scene.remove(orb);
       powerUps.splice(i, 1);
+    }
+  }
+
+  // Spawn and update speed power-ups
+  if (Date.now() - lastSpeedPowerUpSpawn > speedPowerUpSpawnInterval) {
+    spawnSpeedPowerUp();
+    lastSpeedPowerUpSpawn = Date.now();
+  }
+
+  for (let i = speedPowerUps.length - 1; i >= 0; i--) {
+    const orb = speedPowerUps[i];
+    orb.position.z += roadSpeed;
+    orb.rotation.y -= 0.05; // spin opposite direction to distinguish from fireball orb
+
+    const collectors = [player, ...playerClones];
+    const collected = collectors.some(c => {
+      const dx = c.position.x - orb.position.x;
+      const dz = c.position.z - orb.position.z;
+      return Math.sqrt(dx * dx + dz * dz) < 1.2;
+    });
+
+    if (collected) {
+      shootInterval = Math.max(100, shootInterval - 75);
+      speedLevel++;
+      updatePowerUiLabel();
+      scene.remove(orb);
+      speedPowerUps.splice(i, 1);
+      continue;
+    }
+
+    if (orb.position.z > player.position.z + 20) {
+      scene.remove(orb);
+      speedPowerUps.splice(i, 1);
     }
   }
 
