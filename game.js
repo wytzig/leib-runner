@@ -102,6 +102,14 @@ modelManager.loadPlayerModel('assets/leib.glb', player, {
 
 initFireballAssets();
 
+// Fireball power level
+let fireballPower = 1;
+
+// Power-up items
+const powerUps = [];
+const powerUpSpawnInterval = 5000;
+let lastPowerUpSpawn = Date.now();
+
 // Player clones (for multiplication effect)
 const playerClones = [];
 const cloneMixers = [];
@@ -193,6 +201,46 @@ function spawnGoalPosts() {
   goalPosts.push(createGoalPost(5, spawnZ, rightColor, right.value, right.label));
 }
 
+function createPowerUp(x, z) {
+  const orb = new THREE.Group();
+
+  const geo = new THREE.SphereGeometry(0.4, 12, 12);
+  const mat = new THREE.MeshStandardMaterial({ color: 0xff8800, emissive: 0xff4400, emissiveIntensity: 1.5 });
+  const mesh = new THREE.Mesh(geo, mat);
+  orb.add(mesh);
+
+  // Outer glow ring
+  const ringGeo = new THREE.TorusGeometry(0.6, 0.08, 8, 24);
+  const ringMat = new THREE.MeshStandardMaterial({ color: 0xffdd00, emissive: 0xffdd00, emissiveIntensity: 2 });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  orb.add(ring);
+
+  orb.position.set(x, 1.2, z);
+  scene.add(orb);
+  return orb;
+}
+
+function spawnPowerUp() {
+  const spawnZ = player.position.z - 50;
+  const x = (Math.random() * (roadWidth - 2)) - (roadWidth / 2 - 1);
+  powerUps.push(createPowerUp(x, spawnZ));
+}
+
+function updatePowerUiLabel() {
+  const ui = document.getElementById('ui');
+  const charDiv = ui.querySelector('.char-count');
+  const powerDiv = ui.querySelector('.power-level');
+  if (charDiv) charDiv.textContent = `Characters: ${1 + playerClones.length}`;
+  if (powerDiv) powerDiv.textContent = `Power: ${fireballPower}`;
+}
+
+// Tier 1: power 1-7  (orange), Tier 2: power 8-22 (blue), Tier 3: power 23+ (purple)
+function getFireballTier() {
+  if (fireballPower <= 7)  return { color: 0xff3300, posInTier: fireballPower };
+  if (fireballPower <= 22) return { color: 0x0088ff, posInTier: fireballPower - 7 };
+  return                          { color: 0x8800ff, posInTier: fireballPower - 22 };
+}
+
 function initFireballAssets() {
   const ASSET_BASE_URL = 'https://MaxTomahawk.github.io/leibgame-assets/assets/';
 
@@ -222,10 +270,14 @@ function performShoot(shooterPosition, shooterIsPlayer = true) {
 
       const fireball = new THREE.Object3D();
 
-      // Add two overlapping flame sprites
+      // Size resets each tier; color reflects current tier
+      const { color, posInTier } = getFireballTier();
+      const sizeScale = 0.5 + (posInTier - 1) * 0.25;
       for (let i = 0; i < 2; i++) {
-        const sprite = new THREE.Sprite(flameMaterial.clone());
-        sprite.scale.set(0.5 + Math.random() * 0.3, 0.5 + Math.random() * 0.3, 1);
+        const mat = flameMaterial.clone();
+        mat.color.setHex(color);
+        const sprite = new THREE.Sprite(mat);
+        sprite.scale.set(sizeScale + Math.random() * 0.3, sizeScale + Math.random() * 0.3, 1);
         sprite.position.set(0, 0, 0);
         fireball.add(sprite);
       }
@@ -248,8 +300,8 @@ function performShoot(shooterPosition, shooterIsPlayer = true) {
 
       projectiles.push({
         mesh: fireball,
-        velocity: dir.multiplyScalar(30),
-        life: 2.0
+        velocity: dir.multiplyScalar(30 + fireballPower * 5),
+        life: 2.0 + fireballPower * 0.2
       });
 
     }, shooterIsPlayer ? CAST_DELAY : 0); // Clones shoot instantly, player waits for animation
@@ -365,7 +417,7 @@ function multiplyPlayer(multiplier) {
       if (mixerIndex > -1) cloneMixers.splice(mixerIndex, 1);
     }
     const totalCubes = 1 + playerClones.length;
-    document.getElementById('ui').innerHTML = `<div style="font-size: 24px;">Characters: ${totalCubes}</div><div style="font-size: 14px; margin-top: 10px;">WASD to move | Space to jump</div>`;
+    updatePowerUiLabel();
     return;
   }
 
@@ -437,7 +489,7 @@ function multiplyPlayer(multiplier) {
   }
 
   const totalCubes = 1 + playerClones.length;
-  document.getElementById('ui').innerHTML = `<div style="font-size: 24px;">Characters: ${totalCubes}</div><div style="font-size: 14px; margin-top: 10px;">WASD to move | Space to jump</div>`;
+  updatePowerUiLabel();
 }
 
 
@@ -562,6 +614,40 @@ function animate() {
     }
   }
 
+  // Spawn power-ups periodically
+  if (Date.now() - lastPowerUpSpawn > powerUpSpawnInterval) {
+    spawnPowerUp();
+    lastPowerUpSpawn = Date.now();
+  }
+
+  // Update power-ups: move with road, check collection, remove if behind
+  for (let i = powerUps.length - 1; i >= 0; i--) {
+    const orb = powerUps[i];
+    orb.position.z += roadSpeed;
+    orb.rotation.y += 0.03;
+
+    // Collection check — player or any clone
+    const collectors = [player, ...playerClones];
+    const collected = collectors.some(c => {
+      const dx = c.position.x - orb.position.x;
+      const dz = c.position.z - orb.position.z;
+      return Math.sqrt(dx * dx + dz * dz) < 1.2;
+    });
+    if (collected) {
+      fireballPower++;
+      scene.remove(orb);
+      powerUps.splice(i, 1);
+      updatePowerUiLabel();
+      continue;
+    }
+
+    // Remove if behind player
+    if (orb.position.z > player.position.z + 20) {
+      scene.remove(orb);
+      powerUps.splice(i, 1);
+    }
+  }
+
   // Update player clones to follow in circle formation
   for (let i = playerClones.length - 1; i >= 0; i--) {
     const clone = playerClones[i];
@@ -586,7 +672,7 @@ function animate() {
 
         // Update UI
         const totalCubes = 1 + playerClones.length;
-        document.getElementById('ui').innerHTML = `<div style="font-size: 24px;">Characters: ${totalCubes}</div><div style="font-size: 14px; margin-top: 10px;">WASD to move | Space to jump</div>`;
+        updatePowerUiLabel();
 
         console.log('💀 Clone fell off! Remaining:', playerClones.length);
       }
