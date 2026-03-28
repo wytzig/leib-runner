@@ -111,7 +111,7 @@ const goalPosts = [];
 const goalSpawnInterval = 8000; // 8 seconds
 let lastGoalSpawn = Date.now();
 
-function createGoalPost(x, z, color, multiplier) {
+function createGoalPost(x, z, color, multiplier, label) {
   const post = new THREE.Group();
 
   // Left pillar
@@ -149,15 +149,15 @@ function createGoalPost(x, z, color, multiplier) {
   context.font = 'bold 80px Arial';
   context.textAlign = 'center';
   context.textBaseline = 'middle';
-  context.fillText('+' + multiplier, 128, 64);
+  context.fillText(label !== undefined ? label : '+' + multiplier, 128, 64);
 
   // Create texture from canvas
   const texture = new THREE.CanvasTexture(canvas);
   const labelMaterial = new THREE.SpriteMaterial({ map: texture });
-  const label = new THREE.Sprite(labelMaterial);
-  label.scale.set(3, 1.5, 1);
-  label.position.set(0, 2.5, 0);
-  post.add(label);
+  const labelSprite = new THREE.Sprite(labelMaterial);
+  labelSprite.scale.set(3, 1.5, 1);
+  labelSprite.position.set(0, 2.5, 0);
+  post.add(labelSprite);
 
   post.position.set(x, 0, z);
   post.userData.multiplier = multiplier;
@@ -168,16 +168,29 @@ function createGoalPost(x, z, color, multiplier) {
   return post;
 }
 
+function randomGoalValue() {
+  const options = [
+    { value: 1, label: '+1' },
+    { value: 2, label: '+2' },
+    { value: 3, label: '+3' },
+    { value: 5, label: '+5' },
+    { value: -1, label: '-1' },
+    { value: -2, label: '-2' },
+  ];
+  return options[Math.floor(Math.random() * options.length)];
+}
+
 function spawnGoalPosts() {
-  const spawnZ = player.position.z - 50; // Spawn 50 units ahead
+  const spawnZ = player.position.z - 50;
 
-  // Blue goal on the left (+2)
-  const blueGoal = createGoalPost(-5, spawnZ, 0x0088ff, 2);
-  goalPosts.push(blueGoal);
+  const left = randomGoalValue();
+  const right = randomGoalValue();
 
-  // Green goal on the right (+4)
-  const greenGoal = createGoalPost(5, spawnZ, 0x00ff88, 4);
-  goalPosts.push(greenGoal);
+  const leftColor = left.value >= 0 ? 0x0088ff : 0xff4444;
+  const rightColor = right.value >= 0 ? 0x00ff88 : 0xff4444;
+
+  goalPosts.push(createGoalPost(-5, spawnZ, leftColor, left.value, left.label));
+  goalPosts.push(createGoalPost(5, spawnZ, rightColor, right.value, right.label));
 }
 
 function initFireballAssets() {
@@ -258,8 +271,8 @@ document.addEventListener('click', () => {
 // Mouse movement when locked
 document.addEventListener('mousemove', (e) => {
   if (document.pointerLockElement === document.body) {
-    cameraRotationY += e.movementX * mouseSensitivity;
-    cameraRotationX += e.movementY * mouseSensitivity;
+    cameraRotationY -= e.movementX * mouseSensitivity;
+    cameraRotationX -= e.movementY * mouseSensitivity;
 
     // Limit vertical rotation
     cameraRotationX = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, cameraRotationX));
@@ -342,6 +355,20 @@ function checkGoalCollision() {
 function multiplyPlayer(multiplier) {
   console.log('🎯 Multiplying player by', multiplier);
 
+  // Remove clones for negative values
+  if (multiplier < 0) {
+    const toRemove = Math.min(-multiplier, playerClones.length);
+    for (let i = 0; i < toRemove; i++) {
+      const clone = playerClones.pop();
+      scene.remove(clone);
+      const mixerIndex = cloneMixers.indexOf(clone.userData.mixer);
+      if (mixerIndex > -1) cloneMixers.splice(mixerIndex, 1);
+    }
+    const totalCubes = 1 + playerClones.length;
+    document.getElementById('ui').innerHTML = `<div style="font-size: 24px;">Characters: ${totalCubes}</div><div style="font-size: 14px; margin-top: 10px;">WASD to move | Space to jump</div>`;
+    return;
+  }
+
   // Add new clones by loading fresh model instances
   for (let i = 0; i < multiplier; i++) {
     const clone = new THREE.Group();
@@ -410,7 +437,7 @@ function multiplyPlayer(multiplier) {
   }
 
   const totalCubes = 1 + playerClones.length;
-  document.getElementById('ui').innerHTML = `<div style="font-size: 24px;">Characters: ${totalCubes}</div>`;
+  document.getElementById('ui').innerHTML = `<div style="font-size: 24px;">Characters: ${totalCubes}</div><div style="font-size: 14px; margin-top: 10px;">WASD to move | Space to jump</div>`;
 }
 
 
@@ -559,7 +586,7 @@ function animate() {
 
         // Update UI
         const totalCubes = 1 + playerClones.length;
-        document.getElementById('ui').innerHTML = `<div style="font-size: 24px;">Characters: ${totalCubes}</div>`;
+        document.getElementById('ui').innerHTML = `<div style="font-size: 24px;">Characters: ${totalCubes}</div><div style="font-size: 14px; margin-top: 10px;">WASD to move | Space to jump</div>`;
 
         console.log('💀 Clone fell off! Remaining:', playerClones.length);
       }
