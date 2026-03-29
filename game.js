@@ -140,6 +140,16 @@ const enemyProjectiles = [];
 const TURRET_HEALTH = 20;
 const damageNumbers = [];
 const TURRET_FIRE_RATE = 3000; // ms
+const PLATFORM_HALF = 8; // turret platform half-size, used for fence collision
+
+// Side terrain patches (grass, water, road extensions)
+const terrainPatches = [];
+const TERRAIN_SPAWN_INTERVAL = 2500;
+let lastTerrainSpawn = Date.now();
+
+// Stuck-safety tracking for player
+let playerStuckTimer = 0;
+const playerLastPos = new THREE.Vector3();
 
 function createGoalPost(x, z, color, multiplier, label) {
   const post = new THREE.Group();
@@ -229,41 +239,83 @@ function createTurret(x, z) {
   const group = new THREE.Group();
   const stoneMat = new THREE.MeshStandardMaterial({ color: 0x888880 });
   const darkMat  = new THREE.MeshStandardMaterial({ color: 0x555550 });
+  const roadMat  = new THREE.MeshStandardMaterial({ color: 0x50545A, side: THREE.DoubleSide });
 
-  const addBox = (geo, mat, x, y, z) => {
+  const addBox = (geo, mat, bx, by, bz) => {
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(x, y, z);
+    mesh.position.set(bx, by, bz);
     group.add(mesh);
     return mesh;
   };
 
+  // Variable shaft height: between 5 and 11 units
+  const shaftH = 5 + Math.random() * 6;
+  const shaftTop = shaftH + 0.4; // top of shaft = foundation(0.4) + shaft
+
+  // Large road patch under the tower
+  const patchSize = 16;
+  const patchHalf = patchSize / 2;
+  const patch = new THREE.Mesh(new THREE.PlaneGeometry(patchSize, patchSize), roadMat);
+  patch.rotation.x = -Math.PI / 2;
+  patch.position.set(0, 0.01, 0);
+  group.add(patch);
+
+  // Fence on all 4 sides
+  const fenceMat = new THREE.MeshStandardMaterial({ color: 0x4a3728 });
+  const postH = 1.4;
+  const postY = postH / 2;
+
+  const addFencePost = (fx, fz) => {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.18, postH, 0.18), fenceMat);
+    post.position.set(fx, postY, fz);
+    group.add(post);
+  };
+  const addRail = (rx, ry, rz, rw, rd) => {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(rw, 0.1, rd), fenceMat);
+    rail.position.set(rx, ry, rz);
+    group.add(rail);
+  };
+
+  // Along Z edges (front/back): posts stepping in X
+  for (const fz of [-patchHalf, patchHalf]) {
+    for (let fx = -patchHalf; fx <= patchHalf; fx += 2) addFencePost(fx, fz);
+    addRail(0, postY * 1.5, fz, patchSize, 0.1);
+    addRail(0, postY * 0.5, fz, patchSize, 0.1);
+  }
+  // Along X edges (left/right): posts stepping in Z, skip corners (already added)
+  for (const fx of [-patchHalf, patchHalf]) {
+    for (let fz = -patchHalf + 2; fz < patchHalf; fz += 2) addFencePost(fx, fz);
+    addRail(fx, postY * 1.5, 0, 0.1, patchSize);
+    addRail(fx, postY * 0.5, 0, 0.1, patchSize);
+  }
+
   // Foundation slab
-  addBox(new THREE.BoxGeometry(3, 0.4, 3), darkMat, 0, 0.2, 0);
+  addBox(new THREE.BoxGeometry(3.5, 0.4, 3.5), darkMat, 0, 0.2, 0);
 
   // Main tower shaft
-  addBox(new THREE.BoxGeometry(1.6, 4.5, 1.6), stoneMat, 0, 2.65, 0);
+  addBox(new THREE.BoxGeometry(1.8, shaftH, 1.8), stoneMat, 0, 0.4 + shaftH / 2, 0);
 
-  // Watch room (wider platform on top)
-  addBox(new THREE.BoxGeometry(2.8, 1.2, 2.8), stoneMat, 0, 5.5, 0);
+  // Watch room
+  addBox(new THREE.BoxGeometry(3.2, 1.4, 3.2), stoneMat, 0, shaftTop + 0.7, 0);
 
-  // Floor of watch room (dark inset)
-  addBox(new THREE.BoxGeometry(2.4, 0.1, 2.4), darkMat, 0, 4.95, 0);
+  // Dark floor inset
+  addBox(new THREE.BoxGeometry(2.7, 0.1, 2.7), darkMat, 0, shaftTop + 0.05, 0);
 
   // Battlements — 4 corner merlons
-  const merlon = new THREE.BoxGeometry(0.55, 0.8, 0.55);
+  const merlon = new THREE.BoxGeometry(0.6, 0.9, 0.6);
   [[-1, -1], [-1, 1], [1, -1], [1, 1]].forEach(([mx, mz]) => {
-    addBox(merlon, stoneMat, mx * 1.0, 6.7, mz * 1.0);
+    addBox(merlon, stoneMat, mx * 1.1, shaftTop + 1.85, mz * 1.1);
   });
 
-  // Cannon orb (sits in centre of watch room)
+  // Cannon orb
   const cannon = new THREE.Mesh(
     new THREE.SphereGeometry(0.3, 8, 8),
     new THREE.MeshStandardMaterial({ color: 0xff2200, emissive: 0xff2200, emissiveIntensity: 1.8 })
   );
-  cannon.position.y = 5.55;
+  cannon.position.y = shaftTop + 0.75;
   group.add(cannon);
 
-  // Health label above the tower
+  // Health label — floats above battlements
   const healthCanvas = document.createElement('canvas');
   healthCanvas.width = 128;
   healthCanvas.height = 48;
@@ -273,7 +325,7 @@ function createTurret(x, z) {
     depthWrite: false,
   }));
   healthLabel.scale.set(2.5, 0.9, 1);
-  healthLabel.position.y = 8.2;
+  healthLabel.position.y = shaftTop + 3.5;
   group.add(healthLabel);
 
   group.position.set(x, 0, z);
@@ -282,6 +334,7 @@ function createTurret(x, z) {
   group.userData.cannon = cannon;
   group.userData.healthLabel = healthLabel;
   group.userData.healthCanvas = healthCanvas;
+  group.userData.towerTop = shaftTop + 2.5; // for hitbox upper bound
 
   updateTurretHealthLabel(group);
 
@@ -331,7 +384,7 @@ let lastTurretSpawn = Date.now();
 let nextTurretInterval = 5000;
 
 function spawnTurret() {
-  const side = Math.random() < 0.5 ? -9 : 9;
+  const side = Math.random() < 0.5 ? -11 : 11;
   turrets.push(createTurret(side, player.position.z - 75));
   nextTurretInterval = TURRET_SPAWN_MIN + Math.random() * (TURRET_SPAWN_MAX - TURRET_SPAWN_MIN);
 }
@@ -438,82 +491,147 @@ function spawnJumpPowerUp() {
   jumpPowerUps.push(createJumpPowerUp(x, spawnZ));
 }
 
-function showGameOver() {
-  document.getElementById('ui').innerHTML = `
-    <div style="
-      display: inline-block;
-      background: #c0c0c0;
-      border-top: 2px solid #ffffff;
-      border-left: 2px solid #ffffff;
-      border-right: 2px solid #808080;
-      border-bottom: 2px solid #808080;
-      font-family: 'Courier New', monospace;
-      font-size: 13px;
-      color: #000000;
-      min-width: 320px;
-      text-align: left;
-      box-shadow: 4px 4px 0px #000000;
-      pointer-events: all;
-    ">
-      <div style="
-        background: #000080;
-        color: white;
-        font-weight: bold;
-        padding: 3px 6px;
-        font-size: 12px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-      ">
-        <span>&#x1F480; FATAL ERROR — LEIB.EXE</span>
-        <span style="
-          background:#c0c0c0; color:#000; border-top:1px solid #fff;
-          border-left:1px solid #fff; border-right:1px solid #808080;
-          border-bottom:1px solid #808080; padding:0 4px; font-size:11px;
-        ">✕</span>
-      </div>
-      <div style="padding: 16px 16px 8px 16px; display: flex; gap: 12px; align-items: flex-start;">
-        <div style="font-size: 32px; line-height:1;">🛑</div>
-        <div>
-          <div style="margin-bottom: 8px;"><b>A fatal exception has occurred.</b></div>
-          <div style="color:#800000;">LEIB has been terminated by an incoming fireball.</div>
-          <div style="margin-top: 8px; font-size: 11px; color: #444;">
-            Characters remaining: 0<br>
-            Error code: 0x4C454942 (LEIB)<br>
-            Press R to reboot the simulation.
-          </div>
-        </div>
-      </div>
-      <div style="padding: 0 16px 12px 16px; text-align: center;">
-        <div style="
-          display: inline-block;
-          background: #c0c0c0;
-          border-top: 2px solid #ffffff;
-          border-left: 2px solid #ffffff;
-          border-right: 2px solid #808080;
-          border-bottom: 2px solid #808080;
-          padding: 3px 20px;
-          font-size: 12px;
-          cursor: pointer;
-        " onclick="location.reload()">OK</div>
-      </div>
-    </div>
-  `;
-}
 
 function updatePowerUiLabel() {
   const ui = document.getElementById('ui');
-  const charDiv = ui.querySelector('.char-count');
-  const powerDiv = ui.querySelector('.power-level');
-  const speedDiv = ui.querySelector('.speed-level');
-  const jumpDiv  = ui.querySelector('.jump-level');
-  if (charDiv) charDiv.textContent = `Characters: ${1 + playerClones.length}`;
-  if (powerDiv) powerDiv.textContent = `Power: ${fireballPower}`;
-  if (speedDiv) speedDiv.textContent = `Speed: ${speedLevel}`;
-  if (jumpDiv)  jumpDiv.textContent  = `Jumps: ${maxJumps}`;
+  const q = (cls) => ui.querySelector(cls + ' span');
+  if (q('.char-count'))  q('.char-count').textContent  = 1 + playerClones.length;
+  if (q('.power-level')) q('.power-level').textContent = fireballPower;
+  if (q('.speed-level')) q('.speed-level').textContent = speedLevel;
+  if (q('.jump-level'))  q('.jump-level').textContent  = maxJumps;
 }
 
-// Tier 1: power 1-7  (orange), Tier 2: power 8-22 (blue), Tier 3: power 23+ (purple)
+function showGameOver() {
+  const overlay = document.getElementById('gameover-overlay');
+  overlay.style.display = 'flex';
+  overlay.innerHTML = `
+    <div style="
+      background:#c0c0c0;
+      border-top:2px solid #fff;border-left:2px solid #fff;
+      border-right:2px solid #808080;border-bottom:2px solid #808080;
+      font-family:'Courier New',monospace;font-size:13px;color:#000;
+      min-width:340px;box-shadow:6px 6px 0 #000;
+    ">
+      <div style="background:#000080;color:#fff;font-weight:bold;padding:4px 8px;
+                  font-size:12px;display:flex;justify-content:space-between;align-items:center;">
+        <span>&#x1F480; FATAL ERROR — LEIB.EXE</span>
+        <span style="background:#c0c0c0;color:#000;border-top:1px solid #fff;
+          border-left:1px solid #fff;border-right:1px solid #808080;
+          border-bottom:1px solid #808080;padding:0 5px;font-size:11px;cursor:pointer;"
+          onclick="location.reload()">✕</span>
+      </div>
+      <div style="padding:18px 18px 8px;display:flex;gap:14px;align-items:flex-start;">
+        <div style="font-size:36px;line-height:1;">🛑</div>
+        <div>
+          <div style="margin-bottom:8px;"><b>A fatal exception has occurred.</b></div>
+          <div style="color:#800000;">LEIB has been terminated.</div>
+          <div style="margin-top:10px;font-size:11px;color:#444;line-height:1.8;">
+            Characters remaining: 0<br>
+            Error code: 0x4C454942 (LEIB)<br>
+            Press <b>R</b> to reboot the simulation.
+          </div>
+        </div>
+      </div>
+      <div style="padding:0 18px 14px;text-align:center;">
+        <div onclick="location.reload()" style="display:inline-block;background:#c0c0c0;
+          border-top:2px solid #fff;border-left:2px solid #fff;
+          border-right:2px solid #808080;border-bottom:2px solid #808080;
+          padding:4px 28px;font-size:12px;cursor:pointer;font-family:'Courier New',monospace;">
+          OK
+        </div>
+      </div>
+    </div>`;
+}
+
+// --- Fence collision ---
+// Returns true if the position was pushed (entity was inside a fence box)
+function applyFenceCollision(pos) {
+  // Only applies when off the main road
+  if (Math.abs(pos.x) <= roadHalfWidth) return false;
+
+  let pushed = false;
+  for (const turret of turrets) {
+    const tx = turret.position.x;
+    const tz = turret.position.z;
+    const inX = pos.x > tx - PLATFORM_HALF && pos.x < tx + PLATFORM_HALF;
+    const inZ = pos.z > tz - PLATFORM_HALF && pos.z < tz + PLATFORM_HALF;
+    if (!inX || !inZ) continue;
+
+    // Find the wall with least penetration and push out through it
+    const walls = [
+      { axis: 'x', target: tx - PLATFORM_HALF, depth: pos.x - (tx - PLATFORM_HALF) },
+      { axis: 'x', target: tx + PLATFORM_HALF, depth: (tx + PLATFORM_HALF) - pos.x },
+      { axis: 'z', target: tz - PLATFORM_HALF, depth: pos.z - (tz - PLATFORM_HALF) },
+      { axis: 'z', target: tz + PLATFORM_HALF, depth: (tz + PLATFORM_HALF) - pos.z },
+    ];
+    const nearest = walls.reduce((a, b) => a.depth < b.depth ? a : b);
+    pos[nearest.axis] = nearest.target;
+    pushed = true;
+  }
+  return pushed;
+}
+
+// --- Terrain patch creation ---
+function createHolePatch(x, z, w, d) {
+  const group = new THREE.Group();
+
+  // Dark hole surface (slightly above road so it visually overwrites it)
+  const holeMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(w, d),
+    new THREE.MeshStandardMaterial({ color: 0x080808 })
+  );
+  holeMesh.rotation.x = -Math.PI / 2;
+  holeMesh.position.y = 0.06;
+  group.add(holeMesh);
+
+  // Road works: orange cones at corners
+  const coneMat = new THREE.MeshStandardMaterial({ color: 0xff6600, emissive: 0xff3300, emissiveIntensity: 0.4 });
+  const coneGeo = new THREE.ConeGeometry(0.18, 0.55, 6);
+  const corners = [
+    [-w / 2 - 0.3, -d / 2 - 0.3],
+    [ w / 2 + 0.3, -d / 2 - 0.3],
+    [-w / 2 - 0.3,  d / 2 + 0.3],
+    [ w / 2 + 0.3,  d / 2 + 0.3],
+  ];
+  corners.forEach(([cx, cz]) => {
+    const cone = new THREE.Mesh(coneGeo, coneMat);
+    cone.position.set(cx, 0.28, cz);
+    group.add(cone);
+  });
+
+  // Warning sign (yellow board on a stick)
+  const stickMat = new THREE.MeshStandardMaterial({ color: 0x888888 });
+  const stick = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.9, 0.06), stickMat);
+  stick.position.set(0, 0.45, -d / 2 - 0.5);
+  group.add(stick);
+
+  const signMat = new THREE.MeshStandardMaterial({ color: 0xffcc00, emissive: 0xffaa00, emissiveIntensity: 0.5 });
+  const sign = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.5, 0.06), signMat);
+  sign.position.set(0, 1.05, -d / 2 - 0.5);
+  group.add(sign);
+
+  group.position.set(x, 0, z);
+  scene.add(group);
+
+  return { mesh: group, holeMesh, type: 'hole', w, d };
+}
+
+function spawnTerrainPatches() {
+  const spawnZ = player.position.z - 60;
+
+  // Road hole only — skip if near a turret platform
+  if (Math.random() < 0.45) {
+    const nearTurret = turrets.some(t => Math.abs(t.position.z - spawnZ) < PLATFORM_HALF + 5);
+    if (!nearTurret) {
+      const holeW = 2 + Math.random() * 3;
+      const holeD = 2 + Math.random() * 3;
+      const holeX = (Math.random() - 0.5) * (roadWidth - holeW - 2);
+      terrainPatches.push(createHolePatch(holeX, spawnZ, holeW, holeD));
+    }
+  }
+}
+
+/// Tier 1: power 1-7  (orange), Tier 2: power 8-22 (blue), Tier 3: power 23+ (purple)
 function getFireballTier() {
   if (fireballPower <= 7)  return { color: 0xff3300, posInTier: fireballPower };
   if (fireballPower <= 22) return { color: 0x0088ff, posInTier: fireballPower - 7 };
@@ -642,6 +760,20 @@ const jumpForce = 0.3;
 const gravity = 0.015;
 const roadHalfWidth = roadWidth / 2;
 
+// Continuous grass on both sides (recycles like road segments)
+const grassSegments = [];
+const grassMat = new THREE.MeshStandardMaterial({ color: 0x3a7d2c });
+const grassWidth = 160;
+for (let i = 0; i < segmentCount; i++) {
+  [-1, 1].forEach(side => {
+    const g = new THREE.Mesh(new THREE.PlaneGeometry(grassWidth, segmentLength), grassMat);
+    g.rotation.x = -Math.PI / 2;
+    g.position.set(side * (roadHalfWidth + grassWidth / 2), -0.01, -segmentLength / 2 + i * segmentLength);
+    scene.add(g);
+    grassSegments.push(g);
+  });
+}
+
 // Keyboard controls
 const keys = {};
 window.addEventListener('keydown', (e) => {
@@ -656,11 +788,21 @@ window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
 
 // Check if player is on the road
 function isOnRoad() {
-  return Math.abs(player.position.x) <= roadHalfWidth;
+  return isOnSolidGround(player.position.x, player.position.z);
 }
-// check if the position is on the road or not
 function isPositionOnRoad(x) {
   return Math.abs(x) <= roadHalfWidth;
+}
+
+// Grass covers everything — only holes break the ground
+function isOnSolidGround(x, z) {
+  for (const p of terrainPatches) {
+    if (p.type !== 'hole') continue;
+    const px = p.mesh.position.x;
+    const pz = p.mesh.position.z;
+    if (Math.abs(x - px) < p.w / 2 && Math.abs(z - pz) < p.d / 2) return false;
+  }
+  return true;
 }
 
 function checkGoalCollision() {
@@ -814,12 +956,21 @@ function animate() {
     if (segment.position.z > camera.position.z + segmentLength * 2) {
       segment.position.z -= segmentLength * segmentCount;
 
+
       // Move markings too
       if (segment.markings) {
         for (let marking of segment.markings) {
           marking.position.z -= segmentLength * segmentCount;
         }
       }
+    }
+  }
+
+  // Scroll grass segments
+  for (const g of grassSegments) {
+    g.position.z += roadSpeed;
+    if (g.position.z > camera.position.z + segmentLength * 2) {
+      g.position.z -= segmentLength * segmentCount;
     }
   }
 
@@ -968,7 +1119,7 @@ function animate() {
       const dz = proj.mesh.position.z - turret.position.z;
       const horizDist = Math.sqrt(dx*dx + dz*dz);
       const projY = proj.mesh.position.y - turret.position.y;
-      const hitsBody = horizDist < 1.5 && projY >= 0 && projY <= 8;
+      const hitsBody = horizDist < 1.8 && projY >= 0 && projY <= turret.userData.towerTop;
       if (hitsBody) {
         turret.userData.health--;
         showDamageNumber(proj.mesh.position.clone(), 1);
@@ -1134,6 +1285,25 @@ function animate() {
     }
   }
 
+  // Spawn and update terrain patches
+  if (Date.now() - lastTerrainSpawn > TERRAIN_SPAWN_INTERVAL) {
+    spawnTerrainPatches();
+    lastTerrainSpawn = Date.now();
+  }
+
+  for (let i = terrainPatches.length - 1; i >= 0; i--) {
+    const p = terrainPatches[i];
+    p.mesh.position.z += roadSpeed;
+
+    // Holes: isOnSolidGround handles the fall trigger via player movement logic.
+    // Nothing extra needed here — the hole group just scrolls.
+
+    if (p.mesh.position.z > player.position.z + 30) {
+      scene.remove(p.mesh);
+      terrainPatches.splice(i, 1);
+    }
+  }
+
   // Update player clones to follow in circle formation
   for (let i = playerClones.length - 1; i >= 0; i--) {
     const clone = playerClones[i];
@@ -1175,11 +1345,32 @@ function animate() {
     clone.position.y += (targetY - clone.position.y) * 0.15;
     clone.position.z += (targetZ - clone.position.z) * 0.15;
 
-    // Check if clone is off the road and on the ground
-    if (!isPositionOnRoad(clone.position.x) && clone.position.y <= 0.6) {
+    // Fence collision for clone
+    applyFenceCollision(clone.position);
+
+    // Stuck safety: remove clone if it hasn't moved in 3s
+    if (!clone.userData.lastPos) clone.userData.lastPos = clone.position.clone();
+    if (!clone.userData.stuckTimer) clone.userData.stuckTimer = 0;
+    if (clone.position.distanceTo(clone.userData.lastPos) > 0.05) {
+      clone.userData.lastPos.copy(clone.position);
+      clone.userData.stuckTimer = 0;
+    } else {
+      clone.userData.stuckTimer += delta;
+      if (clone.userData.stuckTimer > 3) {
+        // Remove stuck clone
+        scene.remove(clone);
+        const mi = cloneMixers.indexOf(clone.userData.mixer);
+        if (mi > -1) cloneMixers.splice(mi, 1);
+        playerClones.splice(i, 1);
+        updatePowerUiLabel();
+        continue;
+      }
+    }
+
+    // Check if clone is off solid ground
+    if (!isOnSolidGround(clone.position.x, clone.position.z) && clone.position.y <= 0.6) {
       clone.userData.isFalling = true;
-      clone.userData.fallSpeed = 0.05; // Start with a small initial fall speed
-      console.log('⚠️ Clone is off road and starting to fall!');
+      clone.userData.fallSpeed = 0.05;
     }
   }
   // Movement
@@ -1208,18 +1399,32 @@ function animate() {
   player.position.x += velocity.x;
   player.position.z += velocity.z;
 
-  // Check if on road
-  if (!isOnRoad() && player.position.y <= 0.5) {
-    // Start falling
+  // Fence collision for player
+  applyFenceCollision(player.position);
+
+  // Stuck safety: if player hasn't moved in 3s, push back toward road center
+  if (player.position.distanceTo(playerLastPos) > 0.05) {
+    playerLastPos.copy(player.position);
+    playerStuckTimer = 0;
+  } else {
+    playerStuckTimer += delta;
+    if (playerStuckTimer > 3) {
+      player.position.x *= 0.85; // nudge toward x=0
+      playerStuckTimer = 0;
+    }
+  }
+
+  // Check if on solid ground
+  const onGround = isOnSolidGround(player.position.x, player.position.z);
+  if (!onGround && player.position.y <= 0.5) {
     velocity.y = -0.1;
   }
 
-  // Ground collision (only if on road)
-  if (player.position.y <= 0.5 && isOnRoad()) {
+  if (player.position.y <= 0.5 && onGround) {
     player.position.y = 0.5;
     velocity.y = 0;
     isJumping = false;
-    jumpsRemaining = maxJumps; // restore all jumps on landing
+    jumpsRemaining = maxJumps;
   }
 
   // Death (fell below ground)

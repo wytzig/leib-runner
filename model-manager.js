@@ -248,8 +248,7 @@ export class ModelManager {
                 if (vz > 0.1) {
                     nextAnim = 'walk_backwards';
                 } else {
-                    if (isSprinting) nextAnim = 'run';
-                    else nextAnim = 'walk';
+                    nextAnim = 'run';
                 }
             }
         }
