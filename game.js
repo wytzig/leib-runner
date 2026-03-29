@@ -120,6 +120,11 @@ const speedPowerUps = [];
 const speedPowerUpSpawnInterval = 7000;
 let lastSpeedPowerUpSpawn = Date.now();
 
+// Jump power-ups
+const jumpPowerUps = [];
+const jumpPowerUpSpawnInterval = 9000;
+let lastJumpPowerUpSpawn = Date.now();
+
 // Player clones (for multiplication effect)
 const playerClones = [];
 const cloneMixers = [];
@@ -133,6 +138,7 @@ let lastGoalSpawn = Date.now();
 const turrets = [];
 const enemyProjectiles = [];
 const TURRET_HEALTH = 20;
+const damageNumbers = [];
 const TURRET_FIRE_RATE = 3000; // ms
 
 function createGoalPost(x, z, color, multiplier, label) {
@@ -192,6 +198,33 @@ function createGoalPost(x, z, color, multiplier, label) {
   return post;
 }
 
+function showDamageNumber(position, amount) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+
+  ctx.font = 'bold 48px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  // Dark outline for readability
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = 6;
+  ctx.strokeText('-' + amount, 64, 32);
+  ctx.fillStyle = '#ff2222';
+  ctx.fillText('-' + amount, 64, 32);
+
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: new THREE.CanvasTexture(canvas),
+    transparent: true,
+    depthWrite: false,
+  }));
+  sprite.scale.set(1.5, 0.75, 1);
+  sprite.position.copy(position).add(new THREE.Vector3((Math.random() - 0.5) * 0.8, 0, 0));
+  scene.add(sprite);
+  damageNumbers.push({ sprite, life: 1.0 });
+}
+
 function createTurret(x, z) {
   const group = new THREE.Group();
   const stoneMat = new THREE.MeshStandardMaterial({ color: 0x888880 });
@@ -230,18 +263,77 @@ function createTurret(x, z) {
   cannon.position.y = 5.55;
   group.add(cannon);
 
+  // Health label above the tower
+  const healthCanvas = document.createElement('canvas');
+  healthCanvas.width = 128;
+  healthCanvas.height = 48;
+  const healthLabel = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: new THREE.CanvasTexture(healthCanvas),
+    transparent: true,
+    depthWrite: false,
+  }));
+  healthLabel.scale.set(2.5, 0.9, 1);
+  healthLabel.position.y = 8.2;
+  group.add(healthLabel);
+
   group.position.set(x, 0, z);
   group.userData.health = TURRET_HEALTH;
   group.userData.lastShot = Date.now() + 1500;
   group.userData.cannon = cannon;
+  group.userData.healthLabel = healthLabel;
+  group.userData.healthCanvas = healthCanvas;
+
+  updateTurretHealthLabel(group);
 
   scene.add(group);
   return group;
 }
 
-function spawnTurrets(z) {
-  turrets.push(createTurret(-9, z));
-  turrets.push(createTurret(9, z));
+function updateTurretHealthLabel(turret) {
+  const canvas = turret.userData.healthCanvas;
+  const ctx = canvas.getContext('2d');
+  const hp = turret.userData.health;
+  const pct = hp / TURRET_HEALTH;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Background box
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, 0, 128, 48);
+  ctx.strokeStyle = '#888';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(1, 1, 126, 46);
+
+  // Health bar
+  const barColor = pct > 0.5 ? '#00cc44' : pct > 0.25 ? '#ffaa00' : '#ff2222';
+  ctx.fillStyle = barColor;
+  ctx.fillRect(6, 28, Math.round(116 * pct), 13);
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(6, 28, 116, 13);
+
+  // HP text
+  ctx.font = 'bold 14px Courier New';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 3;
+  ctx.strokeText(`HP: ${hp}/${TURRET_HEALTH}`, 64, 16);
+  ctx.fillText(`HP: ${hp}/${TURRET_HEALTH}`, 64, 16);
+
+  turret.userData.healthLabel.material.map.needsUpdate = true;
+}
+
+const TURRET_SPAWN_MIN = 4000;
+const TURRET_SPAWN_MAX = 10000;
+let lastTurretSpawn = Date.now();
+let nextTurretInterval = 5000;
+
+function spawnTurret() {
+  const side = Math.random() < 0.5 ? -9 : 9;
+  turrets.push(createTurret(side, player.position.z - 75));
+  nextTurretInterval = TURRET_SPAWN_MIN + Math.random() * (TURRET_SPAWN_MAX - TURRET_SPAWN_MIN);
 }
 
 function randomGoalValue() {
@@ -318,14 +410,107 @@ function spawnSpeedPowerUp() {
   speedPowerUps.push(createSpeedPowerUp(x, spawnZ));
 }
 
+function createJumpPowerUp(x, z) {
+  const orb = new THREE.Group();
+
+  const mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(0.4, 12, 12),
+    new THREE.MeshStandardMaterial({ color: 0x00ee44, emissive: 0x00aa22, emissiveIntensity: 1.5 })
+  );
+  orb.add(mesh);
+
+  // Ring tilted 45° to distinguish from other orbs
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(0.6, 0.08, 8, 24),
+    new THREE.MeshStandardMaterial({ color: 0x88ff44, emissive: 0x88ff44, emissiveIntensity: 2 })
+  );
+  ring.rotation.x = Math.PI / 4;
+  orb.add(ring);
+
+  orb.position.set(x, 1.2, z);
+  scene.add(orb);
+  return orb;
+}
+
+function spawnJumpPowerUp() {
+  const spawnZ = player.position.z - 50;
+  const x = (Math.random() * (roadWidth - 2)) - (roadWidth / 2 - 1);
+  jumpPowerUps.push(createJumpPowerUp(x, spawnZ));
+}
+
+function showGameOver() {
+  document.getElementById('ui').innerHTML = `
+    <div style="
+      display: inline-block;
+      background: #c0c0c0;
+      border-top: 2px solid #ffffff;
+      border-left: 2px solid #ffffff;
+      border-right: 2px solid #808080;
+      border-bottom: 2px solid #808080;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      color: #000000;
+      min-width: 320px;
+      text-align: left;
+      box-shadow: 4px 4px 0px #000000;
+      pointer-events: all;
+    ">
+      <div style="
+        background: #000080;
+        color: white;
+        font-weight: bold;
+        padding: 3px 6px;
+        font-size: 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      ">
+        <span>&#x1F480; FATAL ERROR — LEIB.EXE</span>
+        <span style="
+          background:#c0c0c0; color:#000; border-top:1px solid #fff;
+          border-left:1px solid #fff; border-right:1px solid #808080;
+          border-bottom:1px solid #808080; padding:0 4px; font-size:11px;
+        ">✕</span>
+      </div>
+      <div style="padding: 16px 16px 8px 16px; display: flex; gap: 12px; align-items: flex-start;">
+        <div style="font-size: 32px; line-height:1;">🛑</div>
+        <div>
+          <div style="margin-bottom: 8px;"><b>A fatal exception has occurred.</b></div>
+          <div style="color:#800000;">LEIB has been terminated by an incoming fireball.</div>
+          <div style="margin-top: 8px; font-size: 11px; color: #444;">
+            Characters remaining: 0<br>
+            Error code: 0x4C454942 (LEIB)<br>
+            Press R to reboot the simulation.
+          </div>
+        </div>
+      </div>
+      <div style="padding: 0 16px 12px 16px; text-align: center;">
+        <div style="
+          display: inline-block;
+          background: #c0c0c0;
+          border-top: 2px solid #ffffff;
+          border-left: 2px solid #ffffff;
+          border-right: 2px solid #808080;
+          border-bottom: 2px solid #808080;
+          padding: 3px 20px;
+          font-size: 12px;
+          cursor: pointer;
+        " onclick="location.reload()">OK</div>
+      </div>
+    </div>
+  `;
+}
+
 function updatePowerUiLabel() {
   const ui = document.getElementById('ui');
   const charDiv = ui.querySelector('.char-count');
   const powerDiv = ui.querySelector('.power-level');
   const speedDiv = ui.querySelector('.speed-level');
+  const jumpDiv  = ui.querySelector('.jump-level');
   if (charDiv) charDiv.textContent = `Characters: ${1 + playerClones.length}`;
   if (powerDiv) powerDiv.textContent = `Power: ${fireballPower}`;
   if (speedDiv) speedDiv.textContent = `Speed: ${speedLevel}`;
+  if (jumpDiv)  jumpDiv.textContent  = `Jumps: ${maxJumps}`;
 }
 
 // Tier 1: power 1-7  (orange), Tier 2: power 8-22 (blue), Tier 3: power 23+ (purple)
@@ -448,6 +633,9 @@ document.addEventListener('contextmenu', (e) => e.preventDefault());
 // Game state
 let velocity = { x: 0, z: 0, y: 0 };
 let isJumping = false;
+let maxJumps = 1;
+let jumpsRemaining = 1;
+let spaceWasDown = false;
 let isDead = false;
 const moveSpeed = 0.15;
 const jumpForce = 0.3;
@@ -603,8 +791,12 @@ function animate() {
   // Spawn goal posts and turrets periodically (turrets offset 25 units behind goal posts)
   if (Date.now() - lastGoalSpawn > goalSpawnInterval) {
     spawnGoalPosts();
-    spawnTurrets(player.position.z - 75);
     lastGoalSpawn = Date.now();
+  }
+
+  if (Date.now() - lastTurretSpawn > nextTurretInterval) {
+    spawnTurret();
+    lastTurretSpawn = Date.now();
   }
 
   // Move road segments backward (creating forward motion)
@@ -695,6 +887,18 @@ function animate() {
     }
   }
 
+  // Update floating damage numbers
+  for (let i = damageNumbers.length - 1; i >= 0; i--) {
+    const dn = damageNumbers[i];
+    dn.life -= delta;
+    dn.sprite.position.y += 0.04;
+    dn.sprite.material.opacity = dn.life;
+    if (dn.life <= 0) {
+      scene.remove(dn.sprite);
+      damageNumbers.splice(i, 1);
+    }
+  }
+
   // Check goal collisions
   checkGoalCollision();
 
@@ -757,21 +961,25 @@ function animate() {
       continue;
     }
 
-    // Check hits from player projectiles
+    // Check hits from player projectiles — full tower body hitbox
     for (let j = projectiles.length - 1; j >= 0; j--) {
       const proj = projectiles[j];
       const dx = proj.mesh.position.x - turret.position.x;
-      const dy = proj.mesh.position.y - (turret.position.y + 5.2);
       const dz = proj.mesh.position.z - turret.position.z;
-      if (Math.sqrt(dx*dx + dy*dy + dz*dz) < 1.0) {
+      const horizDist = Math.sqrt(dx*dx + dz*dz);
+      const projY = proj.mesh.position.y - turret.position.y;
+      const hitsBody = horizDist < 1.5 && projY >= 0 && projY <= 8;
+      if (hitsBody) {
         turret.userData.health--;
+        showDamageNumber(proj.mesh.position.clone(), 1);
+        updateTurretHealthLabel(turret);
         scene.remove(proj.mesh);
         projectiles.splice(j, 1);
 
-        // Flash cannon red on hit
-        turret.userData.cannon.material.emissiveIntensity = 3;
+        // Flash cannon on hit
+        turret.userData.cannon.material.emissiveIntensity = 4;
         setTimeout(() => {
-          if (turret.userData.cannon.material) turret.userData.cannon.material.emissiveIntensity = 1.5;
+          if (turret.userData.cannon.material) turret.userData.cannon.material.emissiveIntensity = 1.8;
         }, 100);
 
         if (turret.userData.health <= 0) {
@@ -855,7 +1063,7 @@ function animate() {
         updatePowerUiLabel();
       } else {
         isDead = true;
-        document.getElementById('ui').innerHTML = '<div style="font-size: 30px; color: red;">YOU DIED!</div><div style="font-size: 18px; margin-top: 10px;">Press R to restart</div>';
+        showGameOver();
       }
     }
   }
@@ -890,6 +1098,39 @@ function animate() {
     if (orb.position.z > player.position.z + 20) {
       scene.remove(orb);
       speedPowerUps.splice(i, 1);
+    }
+  }
+
+  // Spawn and update jump power-ups
+  if (Date.now() - lastJumpPowerUpSpawn > jumpPowerUpSpawnInterval) {
+    spawnJumpPowerUp();
+    lastJumpPowerUpSpawn = Date.now();
+  }
+
+  for (let i = jumpPowerUps.length - 1; i >= 0; i--) {
+    const orb = jumpPowerUps[i];
+    orb.position.z += roadSpeed;
+    orb.rotation.y += 0.04;
+
+    const collectors = [player, ...playerClones];
+    const collected = collectors.some(c => {
+      const dx = c.position.x - orb.position.x;
+      const dz = c.position.z - orb.position.z;
+      return Math.sqrt(dx * dx + dz * dz) < 1.2;
+    });
+
+    if (collected) {
+      maxJumps++;
+      jumpsRemaining = maxJumps;
+      updatePowerUiLabel();
+      scene.remove(orb);
+      jumpPowerUps.splice(i, 1);
+      continue;
+    }
+
+    if (orb.position.z > player.position.z + 20) {
+      scene.remove(orb);
+      jumpPowerUps.splice(i, 1);
     }
   }
 
@@ -950,11 +1191,14 @@ function animate() {
   if (keys['a']) velocity.x = -moveSpeed;
   if (keys['d']) velocity.x = moveSpeed;
 
-  // Jump
-  if (keys[' '] && !isJumping && player.position.y <= 0.5) {
+  // Jump (edge-triggered so holding space doesn't consume all jumps instantly)
+  const spaceDown = keys[' '];
+  if (spaceDown && !spaceWasDown && jumpsRemaining > 0) {
     velocity.y = jumpForce;
+    jumpsRemaining--;
     isJumping = true;
   }
+  spaceWasDown = spaceDown;
 
   // Apply gravity
   velocity.y -= gravity;
@@ -975,12 +1219,13 @@ function animate() {
     player.position.y = 0.5;
     velocity.y = 0;
     isJumping = false;
+    jumpsRemaining = maxJumps; // restore all jumps on landing
   }
 
   // Death (fell below ground)
   if (player.position.y < -5) {
     isDead = true;
-    document.getElementById('ui').innerHTML = '<div style="font-size: 30px; color: red;">YOU DIED!</div><div style="font-size: 18px; margin-top: 10px;">Press R to restart</div>';
+    showGameOver();
   }
 
   // Camera follows player with FPS-style rotation
