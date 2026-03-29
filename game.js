@@ -253,7 +253,7 @@ function createTurret(x, z) {
   const shaftTop = shaftH + 0.4; // top of shaft = foundation(0.4) + shaft
 
   // Large road patch under the tower
-  const patchSize = 16;
+  const patchSize = 11;
   const patchHalf = patchSize / 2;
   const patch = new THREE.Mesh(new THREE.PlaneGeometry(patchSize, patchSize), roadMat);
   patch.rotation.x = -Math.PI / 2;
@@ -505,41 +505,12 @@ function showGameOver() {
   const overlay = document.getElementById('gameover-overlay');
   overlay.style.display = 'flex';
   overlay.innerHTML = `
-    <div style="
-      background:#c0c0c0;
-      border-top:2px solid #fff;border-left:2px solid #fff;
-      border-right:2px solid #808080;border-bottom:2px solid #808080;
-      font-family:'Courier New',monospace;font-size:13px;color:#000;
-      min-width:340px;box-shadow:6px 6px 0 #000;
-    ">
-      <div style="background:#000080;color:#fff;font-weight:bold;padding:4px 8px;
-                  font-size:12px;display:flex;justify-content:space-between;align-items:center;">
-        <span>&#x1F480; FATAL ERROR — LEIB.EXE</span>
-        <span style="background:#c0c0c0;color:#000;border-top:1px solid #fff;
-          border-left:1px solid #fff;border-right:1px solid #808080;
-          border-bottom:1px solid #808080;padding:0 5px;font-size:11px;cursor:pointer;"
-          onclick="location.reload()">✕</span>
-      </div>
-      <div style="padding:18px 18px 8px;display:flex;gap:14px;align-items:flex-start;">
-        <div style="font-size:36px;line-height:1;">🛑</div>
-        <div>
-          <div style="margin-bottom:8px;"><b>A fatal exception has occurred.</b></div>
-          <div style="color:#800000;">LEIB has been terminated.</div>
-          <div style="margin-top:10px;font-size:11px;color:#444;line-height:1.8;">
-            Characters remaining: 0<br>
-            Error code: 0x4C454942 (LEIB)<br>
-            Press <b>R</b> to reboot the simulation.
-          </div>
-        </div>
-      </div>
-      <div style="padding:0 18px 14px;text-align:center;">
-        <div onclick="location.reload()" style="display:inline-block;background:#c0c0c0;
-          border-top:2px solid #fff;border-left:2px solid #fff;
-          border-right:2px solid #808080;border-bottom:2px solid #808080;
-          padding:4px 28px;font-size:12px;cursor:pointer;font-family:'Courier New',monospace;">
-          OK
-        </div>
-      </div>
+    <div style="text-align:center;">
+      <div style="font-family:'Courier New',monospace;font-size:72px;font-weight:bold;
+                  color:#fff;text-shadow:0 0 30px rgba(255,60,60,0.8),0 4px 12px rgba(0,0,0,0.9);
+                  letter-spacing:0.04em;">GAME OVER</div>
+      <div style="font-family:'Courier New',monospace;font-size:28px;color:rgba(255,255,255,0.75);
+                  margin-top:24px;letter-spacing:0.08em;">PRESS R TO RESET</div>
     </div>`;
 }
 
@@ -623,8 +594,8 @@ function spawnTerrainPatches() {
   if (Math.random() < 0.45) {
     const nearTurret = turrets.some(t => Math.abs(t.position.z - spawnZ) < PLATFORM_HALF + 5);
     if (!nearTurret) {
-      const holeW = 2 + Math.random() * 3;
-      const holeD = 2 + Math.random() * 3;
+      const holeW = 2 + Math.random() * 7;
+      const holeD = 2 + Math.random() * 7;
       const holeX = (Math.random() - 0.5) * (roadWidth - holeW - 2);
       terrainPatches.push(createHolePatch(holeX, spawnZ, holeW, holeD));
     }
@@ -773,6 +744,38 @@ for (let i = 0; i < segmentCount; i++) {
     grassSegments.push(g);
   });
 }
+
+// --- Music ---
+const bgMusic = new Audio('Abyss Bounce.wav');
+bgMusic.loop = true;
+bgMusic.volume = 0.5;
+
+let musicMuted = false;
+try {
+  const saved = localStorage.getItem('leib_music_muted');
+  if (saved === 'true') { musicMuted = true; bgMusic.muted = true; }
+} catch(e) {}
+// Sync button label once DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('music-btn');
+  if (btn) btn.textContent = musicMuted ? '🔇' : '🔊';
+});
+
+function startMusic() {
+  bgMusic.play().catch(() => {});
+}
+
+window.toggleMusic = function toggleMusic() {
+  musicMuted = !musicMuted;
+  bgMusic.muted = musicMuted;
+  try { localStorage.setItem('leib_music_muted', musicMuted); } catch(e) {}
+  const btn = document.getElementById('music-btn');
+  if (btn) btn.textContent = musicMuted ? '🔇' : '🔊';
+};
+
+// Start music on first user interaction (browser autoplay policy)
+document.addEventListener('click', startMusic, { once: true });
+document.addEventListener('keydown', startMusic, { once: true });
 
 // Keyboard controls
 const keys = {};
@@ -1420,7 +1423,7 @@ function animate() {
     velocity.y = -0.1;
   }
 
-  if (player.position.y <= 0.5 && onGround) {
+  if (player.position.y <= 0.5 && player.position.y > -0.4 && onGround) {
     player.position.y = 0.5;
     velocity.y = 0;
     isJumping = false;
