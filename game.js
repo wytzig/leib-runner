@@ -621,10 +621,17 @@ function showGameOver() {
       <div style="font-family:'Courier New',monospace;font-size:72px;font-weight:bold;
                   color:#fff;text-shadow:0 0 30px rgba(255,60,60,0.8),0 4px 12px rgba(0,0,0,0.9);
                   letter-spacing:0.04em;">GAME OVER</div>
-      <div style="font-family:'Courier New',monospace;font-size:28px;color:rgba(255,255,255,0.75);
-                  margin-top:24px;letter-spacing:0.08em;">PRESS R TO RESET</div>
+      <button onclick="location.reload()"
+         style="display:inline-block;margin-top:32px;padding:16px 36px;
+                background:#fff;color:#1a0a00;border:none;
+                font-family:'Courier New',monospace;font-size:24px;font-weight:bold;
+                border-radius:10px;letter-spacing:0.06em;
+                box-shadow:0 0 24px rgba(255,255,255,0.4),0 4px 12px rgba(0,0,0,0.5);
+                pointer-events:all;cursor:pointer;">
+        ↺ RESTART
+      </button>
       <a href="https://buymeacoffee.com/wytzig" target="_blank"
-         style="display:inline-block;margin-top:36px;padding:14px 28px;
+         style="display:inline-block;margin-top:20px;padding:14px 28px;
                 background:#FFDD00;color:#1a0a00;
                 font-family:'Courier New',monospace;font-size:20px;font-weight:bold;
                 border-radius:10px;text-decoration:none;letter-spacing:0.04em;
@@ -1000,8 +1007,9 @@ window.toggleMusic = function toggleMusic() {
 };
 
 // Start music on first user interaction (browser autoplay policy)
-document.addEventListener('click', startMusic, { once: true });
-document.addEventListener('keydown', startMusic, { once: true });
+document.addEventListener('click',      startMusic, { once: true });
+document.addEventListener('keydown',    startMusic, { once: true });
+document.addEventListener('touchstart', startMusic, { once: true, passive: true });
 
 // Keyboard controls
 const keys = {};
@@ -1018,16 +1026,18 @@ window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
 // --- Mobile / Tilt Controls ---
 let tiltLeft  = false;
 let tiltRight = false;
-const TILT_DEADZONE = 8; // degrees
+const TILT_DEADZONE = 10; // degrees
+let tiltNeutral = null;   // calibrated on first reading
 
 function setupDeviceOrientation() {
   window.addEventListener('deviceorientation', (e) => {
-    // gamma is the screen-relative left/right tilt (-90 = full left, +90 = full right).
-    // Modern browsers adjust it automatically for screen orientation, so no manual
-    // landscape remapping needed.
-    const tilt = e.gamma || 0;
-    tiltLeft  = tilt > TILT_DEADZONE;
-    tiltRight = tilt < -TILT_DEADZONE;
+    // beta = vertical rotation (top edge tilts up/down).
+    // Used for landscape play: tilt top of device left/right to steer.
+    const beta = e.beta || 0;
+    if (tiltNeutral === null) tiltNeutral = beta;
+    const tilt = beta - tiltNeutral;
+    tiltLeft  = tilt < -TILT_DEADZONE;
+    tiltRight = tilt > TILT_DEADZONE;
   });
 }
 
@@ -1053,32 +1063,16 @@ if (typeof DeviceOrientationEvent === 'undefined' ||
 }
 
 // Touch buttons
-const _btnJump  = document.getElementById('btn-jump');
-const _btnShoot = document.getElementById('btn-shoot');
+const _btnJump = document.getElementById('btn-jump');
 
 if (_btnJump) {
   _btnJump.addEventListener('touchstart', (e) => {
     e.preventDefault();
     requestOrientationPermission();
-    startMusic();
     keys[' '] = true;
   }, { passive: false });
   _btnJump.addEventListener('touchend',   (e) => { e.preventDefault(); keys[' '] = false; }, { passive: false });
   _btnJump.addEventListener('touchcancel',(e) => { e.preventDefault(); keys[' '] = false; }, { passive: false });
-}
-
-if (_btnShoot) {
-  _btnShoot.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    requestOrientationPermission();
-    startMusic();
-    if (isDead) return;
-    const now = Date.now();
-    if (now - lastShootTime < shootInterval) return;
-    lastShootTime = now;
-    performShoot(player.position, true);
-    for (const clone of playerClones) performShoot(clone.position, false);
-  }, { passive: false });
 }
 
 // Check if player is on the road
