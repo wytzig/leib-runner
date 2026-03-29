@@ -134,6 +134,58 @@ canvas {
   background: rgba(40, 40, 60, 0.9);
 }
 
+/* Mobile controls (touch devices only) */
+#mobile-controls {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 130px;
+  z-index: 150;
+  pointer-events: none;
+}
+
+.mobile-btn {
+  position: absolute;
+  bottom: 20px;
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  font-size: 36px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  background: rgba(10, 10, 18, 0.65);
+  color: #fff;
+  cursor: pointer;
+  pointer-events: all;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mobile-btn:active {
+  background: rgba(60, 60, 100, 0.85);
+  transform: scale(0.93);
+}
+
+#btn-shoot { left: 20px; }
+#btn-jump  { right: 20px; }
+
+/* Show mobile controls on touch screens */
+@media (hover: none) and (pointer: coarse) {
+  #mobile-controls       { display: block; }
+  .hud-hint-desktop      { display: none; }
+  .hud-hint-mobile       { display: block; }
+}
+
+/* Hide mobile hint on desktop */
+.hud-hint-mobile { display: none; }
+
 #gameover-overlay {
   display: none;
   position: fixed;

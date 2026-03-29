@@ -1015,6 +1015,84 @@ window.addEventListener('keydown', (e) => {
 });
 window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
 
+// --- Mobile / Tilt Controls ---
+let tiltLeft  = false;
+let tiltRight = false;
+const TILT_DEADZONE = 8; // degrees
+
+function setupDeviceOrientation() {
+  window.addEventListener('deviceorientation', (e) => {
+    // Use gamma (left/right tilt). On iOS in landscape, Apple remaps axes so gamma
+    // still represents the screen's left/right lean. Android users may need beta,
+    // but gamma works as a reasonable default across devices.
+    const screenAngle = (screen.orientation && screen.orientation.angle != null)
+      ? screen.orientation.angle
+      : (window.orientation || 0);
+
+    let tilt;
+    if (screenAngle === 90) {
+      tilt = (e.beta || 0) - 90;     // landscape-left
+    } else if (screenAngle === -90 || screenAngle === 270) {
+      tilt = -((e.beta || 0) + 90);  // landscape-right
+    } else {
+      tilt = e.gamma || 0;           // portrait / fallback
+    }
+
+    tiltLeft  = tilt < -TILT_DEADZONE;
+    tiltRight = tilt > TILT_DEADZONE;
+  });
+}
+
+// iOS 13+ requires a user-gesture to access DeviceOrientationEvent
+let _iosOrientationRequested = false;
+function requestOrientationPermission() {
+  if (_iosOrientationRequested) return;
+  _iosOrientationRequested = true;
+  if (typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    DeviceOrientationEvent.requestPermission()
+      .then(state => { if (state === 'granted') setupDeviceOrientation(); })
+      .catch(() => {});
+  } else {
+    setupDeviceOrientation();
+  }
+}
+
+// Set up orientation immediately on non-iOS; iOS waits for first touch
+if (typeof DeviceOrientationEvent === 'undefined' ||
+    typeof DeviceOrientationEvent.requestPermission !== 'function') {
+  setupDeviceOrientation();
+}
+
+// Touch buttons
+const _btnJump  = document.getElementById('btn-jump');
+const _btnShoot = document.getElementById('btn-shoot');
+
+if (_btnJump) {
+  _btnJump.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    requestOrientationPermission();
+    startMusic();
+    keys[' '] = true;
+  }, { passive: false });
+  _btnJump.addEventListener('touchend',   (e) => { e.preventDefault(); keys[' '] = false; }, { passive: false });
+  _btnJump.addEventListener('touchcancel',(e) => { e.preventDefault(); keys[' '] = false; }, { passive: false });
+}
+
+if (_btnShoot) {
+  _btnShoot.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    requestOrientationPermission();
+    startMusic();
+    if (isDead) return;
+    const now = Date.now();
+    if (now - lastShootTime < shootInterval) return;
+    lastShootTime = now;
+    performShoot(player.position, true);
+    for (const clone of playerClones) performShoot(clone.position, false);
+  }, { passive: false });
+}
+
 // Check if player is on the road
 function isOnRoad() {
   return isOnSolidGround(player.position.x, player.position.z);
@@ -1806,8 +1884,8 @@ function animate() {
 
   if (keys['w']) velocity.z = -moveSpeed;
   if (keys['s']) velocity.z = moveSpeed;
-  if (keys['a']) velocity.x = -moveSpeed;
-  if (keys['d']) velocity.x = moveSpeed;
+  if (keys['a'] || tiltLeft)  velocity.x = -moveSpeed;
+  if (keys['d'] || tiltRight) velocity.x = moveSpeed;
 
   // Jump (edge-triggered so holding space doesn't consume all jumps instantly)
   const spaceDown = keys[' '];

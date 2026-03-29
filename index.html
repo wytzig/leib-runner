@@ -27,11 +27,16 @@
         <div class="hud-sep"></div>
         <div class="hud-row jump-level">🟢 <span>1</span></div>
       </div>
-      <div class="hud-hint">WASD · Space · Click</div>
+      <div class="hud-hint hud-hint-desktop">WASD · Space · Click</div>
+      <div class="hud-hint hud-hint-mobile">Tilt · Jump · Shoot</div>
     </div>
   </div>
   <button id="music-btn" onclick="window.toggleMusic && window.toggleMusic()" title="Toggle music">🔊</button>
   <a id="coffee-btn" href="https://buymeacoffee.com/wytzig" target="_blank" title="Buy me a coffee">☕</a>
+  <div id="mobile-controls">
+    <button id="btn-shoot" class="mobile-btn" aria-label="Shoot">🔥</button>
+    <button id="btn-jump"  class="mobile-btn" aria-label="Jump">⬆</button>
+  </div>
   <div id="gameover-overlay"></div>
   <script type="module" src="game.js"></script>
 </body>
