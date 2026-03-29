@@ -8,8 +8,15 @@ Classic runner obstacle. Barrels roll down the road toward Leib at varying speed
 ### 2. Wall Slabs
 A solid wall spanning part of the road width spawns ahead and slides toward you. Has a gap on one side — you must read which side and dodge through it in time. Lean into the lane-switching tension of the runner genre.
 
-### 3. Zombie Leibs
+### 3. Zombie Leibs ✅ IMPLEMENTED
 Enemy characters that look like Leib but shuffling toward you down the road. Can be killed with fireballs (satisfying use of the shoot mechanic). If they reach you they drain one clone. Could have a health bar that scales with fireball power.
+
+#### Specs (implemented)
+- **Spawn:** On the grass, 8–20 units past road edge, random side (40% chance both sides at once)
+- **Movement:** Shamble inward toward road center at `ZOMBIE_SPEED = 0.012` units/frame, scrolling with road
+- **Health:** 3 hits; flashes red on each hit with damage number
+- **Damage:** Contact destroys the zombie and removes the closest clone; no clones → game over
+- **Visual:** Geometric humanoid — dark green box body, sphere head, glowing red eyes, outstretched arms, animated legs
 
 ### 4. Fireball-Turret Pillars ✅ SELECTED
 Stationary pillars on the road edges that shoot fireballs at Leib periodically. Can be destroyed with enough hits. Rewards aggressive shooting over just dodging.
@@ -31,5 +38,15 @@ Short gaps in the road that require a well-timed jump to cross. Clones that can'
 A shockwave pulse that travels down the road. If it hits you, it knocks back your clones — some may fall off the edge. Can be jumped over. Pairs well with the clone-count mechanic.
 
 ---
+
+---
+
+## Goal Post Placement
+
+### Random positions ✅ IMPLEMENTED
+Goal posts no longer spawn at fixed x=±5. Each wave now:
+- 65% chance: 2 gates — left center randomised in ~[-6, -3.75], right in ~[3.75, 6], ensuring no overlap
+- 35% chance: 1 gate — center randomised across the full road width
+- Skipped entirely if a turret platform is within 6+PLATFORM_HALF units at that Z
 
 *Once you pick a direction, add full specs here (health, speed, spawn rate, damage, visual) before implementation.*

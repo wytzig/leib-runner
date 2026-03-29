@@ -137,7 +137,7 @@ let lastGoalSpawn = Date.now();
 // Turrets
 const turrets = [];
 const enemyProjectiles = [];
-const TURRET_HEALTH = 20;
+const TURRET_HEALTH = 60;
 const damageNumbers = [];
 const TURRET_FIRE_RATE = 3000; // ms
 const PLATFORM_HALF = 8; // turret platform half-size, used for fence collision
@@ -210,36 +210,38 @@ function createGoalPost(x, z, color, multiplier, label) {
 
 function showDamageNumber(position, amount) {
   const canvas = document.createElement('canvas');
-  canvas.width = 128;
-  canvas.height = 64;
+  canvas.width = 256;
+  canvas.height = 128;
   const ctx = canvas.getContext('2d');
 
-  ctx.font = 'bold 48px Arial';
+  const text = '-' + amount;
+  ctx.font = 'bold 96px Arial';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  // Dark outline for readability
   ctx.strokeStyle = '#000000';
-  ctx.lineWidth = 6;
-  ctx.strokeText('-' + amount, 64, 32);
-  ctx.fillStyle = '#ff2222';
-  ctx.fillText('-' + amount, 64, 32);
+  ctx.lineWidth = 10;
+  ctx.strokeText(text, 128, 64);
+  ctx.fillStyle = amount >= 10 ? '#ffdd00' : '#ff2222';
+  ctx.fillText(text, 128, 64);
 
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
     map: new THREE.CanvasTexture(canvas),
     transparent: true,
     depthWrite: false,
   }));
-  sprite.scale.set(1.5, 0.75, 1);
-  sprite.position.copy(position).add(new THREE.Vector3((Math.random() - 0.5) * 0.8, 0, 0));
+  // Scale proportional to damage magnitude
+  const s = 1.5 + Math.min(amount * 0.08, 2.0);
+  sprite.scale.set(s * 2, s, 1);
+  sprite.position.copy(position).add(new THREE.Vector3((Math.random() - 0.5) * 0.8, 0.5, 0));
   scene.add(sprite);
-  damageNumbers.push({ sprite, life: 1.0 });
+  damageNumbers.push({ sprite, life: 1.2 });
 }
 
-function createTurret(x, z) {
+function createTurret(x, z, isRed = false) {
   const group = new THREE.Group();
-  const stoneMat = new THREE.MeshStandardMaterial({ color: 0x888880 });
-  const darkMat  = new THREE.MeshStandardMaterial({ color: 0x555550 });
-  const roadMat  = new THREE.MeshStandardMaterial({ color: 0x50545A, side: THREE.DoubleSide });
+  const stoneMat = new THREE.MeshStandardMaterial({ color: isRed ? 0x7a2020 : 0x888880 });
+  const darkMat  = new THREE.MeshStandardMaterial({ color: isRed ? 0x4a1010 : 0x555550 });
+  const roadMat  = new THREE.MeshStandardMaterial({ color: isRed ? 0x5a2010 : 0x50545A, side: THREE.DoubleSide });
 
   const addBox = (geo, mat, bx, by, bz) => {
     const mesh = new THREE.Mesh(geo, mat);
@@ -308,9 +310,10 @@ function createTurret(x, z) {
   });
 
   // Cannon orb
+  const cannonColor = isRed ? 0xff6600 : 0xff2200;
   const cannon = new THREE.Mesh(
-    new THREE.SphereGeometry(0.3, 8, 8),
-    new THREE.MeshStandardMaterial({ color: 0xff2200, emissive: 0xff2200, emissiveIntensity: 1.8 })
+    new THREE.SphereGeometry(isRed ? 0.42 : 0.3, 8, 8),
+    new THREE.MeshStandardMaterial({ color: cannonColor, emissive: cannonColor, emissiveIntensity: isRed ? 3 : 1.8 })
   );
   cannon.position.y = shaftTop + 0.75;
   group.add(cannon);
@@ -329,12 +332,16 @@ function createTurret(x, z) {
   group.add(healthLabel);
 
   group.position.set(x, 0, z);
-  group.userData.health = TURRET_HEALTH;
+  const maxHp = isRed ? Math.round(TURRET_HEALTH * 1.5) : TURRET_HEALTH;
+  group.userData.health = maxHp;
+  group.userData.maxHealth = maxHp;
   group.userData.lastShot = Date.now() + 1500;
   group.userData.cannon = cannon;
   group.userData.healthLabel = healthLabel;
   group.userData.healthCanvas = healthCanvas;
   group.userData.towerTop = shaftTop + 2.5; // for hitbox upper bound
+  group.userData.fireRate = isRed ? Math.round(TURRET_FIRE_RATE / 3) : TURRET_FIRE_RATE;
+  group.userData.isRed = isRed;
 
   updateTurretHealthLabel(group);
 
@@ -346,7 +353,7 @@ function updateTurretHealthLabel(turret) {
   const canvas = turret.userData.healthCanvas;
   const ctx = canvas.getContext('2d');
   const hp = turret.userData.health;
-  const pct = hp / TURRET_HEALTH;
+  const pct = hp / turret.userData.maxHealth;
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -372,8 +379,8 @@ function updateTurretHealthLabel(turret) {
   ctx.fillStyle = '#ffffff';
   ctx.strokeStyle = '#000';
   ctx.lineWidth = 3;
-  ctx.strokeText(`HP: ${hp}/${TURRET_HEALTH}`, 64, 16);
-  ctx.fillText(`HP: ${hp}/${TURRET_HEALTH}`, 64, 16);
+  ctx.strokeText(`HP: ${hp}/${turret.userData.maxHealth}`, 64, 16);
+  ctx.fillText(`HP: ${hp}/${turret.userData.maxHealth}`, 64, 16);
 
   turret.userData.healthLabel.material.map.needsUpdate = true;
 }
@@ -383,10 +390,90 @@ const TURRET_SPAWN_MAX = 10000;
 let lastTurretSpawn = Date.now();
 let nextTurretInterval = 5000;
 
+// Zombie Leibs — shamble in from the grass toward the road
+const zombies = [];
+const ZOMBIE_HEALTH = 3;
+const ZOMBIE_SPEED = 0.012; // lateral inward speed per frame
+const ZOMBIE_SPAWN_MIN = 3000;
+const ZOMBIE_SPAWN_MAX = 7000;
+let lastZombieSpawn = Date.now();
+let nextZombieInterval = 4000;
+
 function spawnTurret() {
   const side = Math.random() < 0.5 ? -11 : 11;
-  turrets.push(createTurret(side, player.position.z - 75));
+  const isRed = Math.random() < 1 / 12;
+  turrets.push(createTurret(side, player.position.z - 75, isRed));
   nextTurretInterval = TURRET_SPAWN_MIN + Math.random() * (TURRET_SPAWN_MAX - TURRET_SPAWN_MIN);
+}
+
+function createZombie(side, z) {
+  const group = new THREE.Group();
+
+  // Body
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2d5a1b, roughness: 0.9 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.1, 0.4), bodyMat);
+  body.position.y = 1.3;
+  group.add(body);
+
+  // Head
+  const headMat = new THREE.MeshStandardMaterial({ color: 0x4a7a30, roughness: 0.8 });
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.32, 7, 7), headMat);
+  head.position.y = 2.2;
+  group.add(head);
+
+  // Eyes (glowing red)
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 2 });
+  const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.07, 5, 5), eyeMat);
+  eyeL.position.set(-0.13, 2.22, 0.28);
+  const eyeR = new THREE.Mesh(new THREE.SphereGeometry(0.07, 5, 5), eyeMat);
+  eyeR.position.set(0.13, 2.22, 0.28);
+  group.add(eyeL, eyeR);
+
+  // Arms (outstretched toward road)
+  const armMat = new THREE.MeshStandardMaterial({ color: 0x2d5a1b, roughness: 0.9 });
+  const armGeom = new THREE.BoxGeometry(0.25, 0.25, 0.8);
+  const armL = new THREE.Mesh(armGeom, armMat);
+  armL.position.set(-0.55, 1.5, 0.35);
+  const armR = new THREE.Mesh(armGeom, armMat);
+  armR.position.set(0.55, 1.5, 0.35);
+  group.add(armL, armR);
+
+  // Legs
+  const legGeom = new THREE.BoxGeometry(0.28, 0.9, 0.3);
+  const legL = new THREE.Mesh(legGeom, bodyMat);
+  legL.position.set(-0.2, 0.45, 0);
+  const legR = new THREE.Mesh(legGeom, bodyMat);
+  legR.position.set(0.2, 0.45, 0);
+  group.add(legL, legR);
+
+  // Spawn on the grass, facing inward
+  const spawnX = side * (roadHalfWidth + 8 + Math.random() * 12);
+  group.position.set(spawnX, 0, z);
+  group.rotation.y = side > 0 ? Math.PI : 0; // face the road
+
+  group.userData = {
+    health: ZOMBIE_HEALTH,
+    side,       // -1 or +1 direction of inward movement
+    legL, legR,
+    legPhase: Math.random() * Math.PI * 2,
+  };
+
+  scene.add(group);
+  return group;
+}
+
+function spawnZombie() {
+  // Spawn 1–2 zombies on random or both sides
+  const count = Math.random() < 0.4 ? 2 : 1;
+  const z = player.position.z - 80;
+  if (count === 2) {
+    zombies.push(createZombie(-1, z));
+    zombies.push(createZombie(1, z + (Math.random() - 0.5) * 20));
+  } else {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    zombies.push(createZombie(side, z));
+  }
+  nextZombieInterval = ZOMBIE_SPAWN_MIN + Math.random() * (ZOMBIE_SPAWN_MAX - ZOMBIE_SPAWN_MIN);
 }
 
 function randomGoalValue() {
@@ -404,14 +491,28 @@ function randomGoalValue() {
 function spawnGoalPosts() {
   const spawnZ = player.position.z - 50;
 
-  const left = randomGoalValue();
-  const right = randomGoalValue();
+  // Skip if a turret is too close at this Z
+  const nearTurret = turrets.some(t => Math.abs(t.position.z - spawnZ) < PLATFORM_HALF + 6);
+  if (nearTurret) return;
 
-  const leftColor = left.value >= 0 ? 0x0088ff : 0xff4444;
-  const rightColor = right.value >= 0 ? 0x00ff88 : 0xff4444;
+  // Gate half-width is 3.5; keep pillars inside road (±9.5), so centers in [-6, 6].
+  // Split road into left [-6, -1] and right [1, 6] halves so 2 gates never overlap.
+  const GATE_HALF = 3.75; // slight buffer beyond pillar offset
+  const leftX  = -(GATE_HALF + Math.random() * (6 - GATE_HALF));   // ~[-6, -3.75]
+  const rightX =   GATE_HALF + Math.random() * (6 - GATE_HALF);    // ~[3.75,  6]
 
-  goalPosts.push(createGoalPost(-5, spawnZ, leftColor, left.value, left.label));
-  goalPosts.push(createGoalPost(5, spawnZ, rightColor, right.value, right.label));
+  const count = Math.random() < 0.35 ? 1 : 2; // 35% chance for single gate
+  const singleX = (Math.random() - 0.5) * (12 - GATE_HALF * 2); // centered on road
+
+  if (count === 1) {
+    const v = randomGoalValue();
+    goalPosts.push(createGoalPost(singleX, spawnZ, v.value >= 0 ? 0x00ffcc : 0xff4444, v.value, v.label));
+  } else {
+    const left = randomGoalValue();
+    const right = randomGoalValue();
+    goalPosts.push(createGoalPost(leftX,  spawnZ, left.value  >= 0 ? 0x0088ff : 0xff4444, left.value,  left.label));
+    goalPosts.push(createGoalPost(rightX, spawnZ, right.value >= 0 ? 0x00ff88 : 0xff4444, right.value, right.label));
+  }
 }
 
 function createPowerUp(x, z) {
@@ -591,7 +692,7 @@ function spawnTerrainPatches() {
   const spawnZ = player.position.z - 60;
 
   // Road hole only — skip if near a turret platform
-  if (Math.random() < 0.45) {
+  if (Math.random() < 0.15) {
     const nearTurret = turrets.some(t => Math.abs(t.position.z - spawnZ) < PLATFORM_HALF + 5);
     if (!nearTurret) {
       const holeW = 2 + Math.random() * 7;
@@ -944,6 +1045,11 @@ function animate() {
     lastTurretSpawn = Date.now();
   }
 
+  if (Date.now() - lastZombieSpawn > nextZombieInterval) {
+    spawnZombie();
+    lastZombieSpawn = Date.now();
+  }
+
   // Move road segments backward (creating forward motion)
   for (let segment of roadSegments) {
     segment.position.z += roadSpeed;
@@ -1147,7 +1253,7 @@ function animate() {
     if (!turrets[i]) continue; // was destroyed above
 
     // Fire at player
-    if (now - turret.userData.lastShot > TURRET_FIRE_RATE) {
+    if (now - turret.userData.lastShot > turret.userData.fireRate) {
       turret.userData.lastShot = now;
 
       const fb = new THREE.Mesh(
@@ -1220,6 +1326,96 @@ function animate() {
         showGameOver();
       }
     }
+  }
+
+  // Update zombie leibs
+  for (let i = zombies.length - 1; i >= 0; i--) {
+    const z = zombies[i];
+
+    // Scroll with road
+    z.position.z += roadSpeed;
+
+    // Shamble inward (toward road center)
+    z.position.x -= z.userData.side * ZOMBIE_SPEED;
+
+    // Animate legs (rock back and forth)
+    z.userData.legPhase += 0.12;
+    z.userData.legL.rotation.x = Math.sin(z.userData.legPhase) * 0.5;
+    z.userData.legR.rotation.x = -Math.sin(z.userData.legPhase) * 0.5;
+    // Slight body bob
+    z.position.y = Math.abs(Math.sin(z.userData.legPhase)) * 0.08;
+
+    // Remove if scrolled past player or wandered too far past road center
+    if (z.position.z > player.position.z + 25 || Math.abs(z.position.x) > roadHalfWidth + 80) {
+      scene.remove(z);
+      zombies.splice(i, 1);
+      continue;
+    }
+
+    // Check if zombie is hit by player projectiles
+    let destroyed = false;
+    for (let j = projectiles.length - 1; j >= 0; j--) {
+      const proj = projectiles[j];
+      const dx = proj.mesh.position.x - z.position.x;
+      const dy = proj.mesh.position.y - z.position.y - 1.3;
+      const dz = proj.mesh.position.z - z.position.z;
+      if (Math.sqrt(dx*dx + dy*dy + dz*dz) < 1.1) {
+        z.userData.health--;
+        showDamageNumber(proj.mesh.position.clone(), 1);
+        scene.remove(proj.mesh);
+        projectiles.splice(j, 1);
+        if (z.userData.health <= 0) {
+          scene.remove(z);
+          zombies.splice(i, 1);
+          destroyed = true;
+          break;
+        }
+        // Flash red on hit
+        z.traverse(child => {
+          if (child.isMesh && child.material.color) {
+            child.material.emissive = new THREE.Color(0xff0000);
+            child.material.emissiveIntensity = 2;
+            setTimeout(() => {
+              if (child.material) { child.material.emissive.set(0x000000); child.material.emissiveIntensity = 0; }
+            }, 120);
+          }
+        });
+        break;
+      }
+    }
+    if (destroyed) continue;
+
+    // Check if zombie touches player or a clone
+    const targets = [player, ...playerClones];
+    for (let t = targets.length - 1; t >= 0; t--) {
+      const tgt = targets[t];
+      const dx = z.position.x - tgt.position.x;
+      const dz2 = z.position.z - tgt.position.z;
+      if (Math.sqrt(dx*dx + dz2*dz2) < 1.2) {
+        scene.remove(z);
+        zombies.splice(i, 1);
+        destroyed = true;
+        if (t === 0 && playerClones.length === 0) {
+          isDead = true;
+          showGameOver();
+        } else if (t === 0) {
+          const clone = playerClones.pop();
+          scene.remove(clone);
+          const mixerIdx = cloneMixers.indexOf(clone.userData.mixer);
+          if (mixerIdx > -1) cloneMixers.splice(mixerIdx, 1);
+          updatePowerUiLabel();
+        } else {
+          const clone = playerClones[t - 1];
+          scene.remove(clone);
+          const mixerIdx = cloneMixers.indexOf(clone.userData.mixer);
+          if (mixerIdx > -1) cloneMixers.splice(mixerIdx, 1);
+          playerClones.splice(t - 1, 1);
+          updatePowerUiLabel();
+        }
+        break;
+      }
+    }
+    if (destroyed) continue;
   }
 
   // Spawn and update speed power-ups
