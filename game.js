@@ -147,6 +147,17 @@ const terrainPatches = [];
 const TERRAIN_SPAWN_INTERVAL = 2500;
 let lastTerrainSpawn = Date.now();
 
+// Grass tufts (decorative, scroll with road)
+const grassTufts = [];
+const GRASS_SPAWN_INTERVAL = 800;
+let lastGrassSpawn = Date.now();
+
+// Roadside temples (decorative candle shrines, scroll with road)
+const roadsideTemples = [];
+const TEMPLE_SPAWN_INTERVAL = 14000;
+let lastTempleSpawn = Date.now() - 12000; // spawn one soon after start
+let nextTempleSide = 1;
+
 // Stuck-safety tracking for player
 let playerStuckTimer = 0;
 const playerLastPos = new THREE.Vector3();
@@ -596,7 +607,7 @@ function spawnJumpPowerUp() {
 function updatePowerUiLabel() {
   const ui = document.getElementById('ui');
   const q = (cls) => ui.querySelector(cls + ' span');
-  if (q('.char-count'))  q('.char-count').textContent  = 1 + playerClones.length;
+  if (q('.char-count'))  q('.char-count').textContent  = isGiant ? `GIANT (${giantHp}hp)` : 1 + playerClones.length;
   if (q('.power-level')) q('.power-level').textContent = fireballPower;
   if (q('.speed-level')) q('.speed-level').textContent = speedLevel;
   if (q('.jump-level'))  q('.jump-level').textContent  = maxJumps;
@@ -612,6 +623,15 @@ function showGameOver() {
                   letter-spacing:0.04em;">GAME OVER</div>
       <div style="font-family:'Courier New',monospace;font-size:28px;color:rgba(255,255,255,0.75);
                   margin-top:24px;letter-spacing:0.08em;">PRESS R TO RESET</div>
+      <a href="https://buymeacoffee.com/wytzig" target="_blank"
+         style="display:inline-block;margin-top:36px;padding:14px 28px;
+                background:#FFDD00;color:#1a0a00;
+                font-family:'Courier New',monospace;font-size:20px;font-weight:bold;
+                border-radius:10px;text-decoration:none;letter-spacing:0.04em;
+                box-shadow:0 0 24px rgba(255,220,0,0.7),0 4px 12px rgba(0,0,0,0.5);
+                pointer-events:all;cursor:pointer;">
+        ☕ Buy me a coffee
+      </a>
     </div>`;
 }
 
@@ -686,6 +706,107 @@ function createHolePatch(x, z, w, d) {
   scene.add(group);
 
   return { mesh: group, holeMesh, type: 'hole', w, d };
+}
+
+function createGrassTuftCluster(cx, cz) {
+  const group = new THREE.Group();
+  const count = 6 + Math.floor(Math.random() * 8);
+  const greenShades = [0x2e7d22, 0x3a9630, 0x4db840, 0x256b1a, 0x61c44d];
+  for (let i = 0; i < count; i++) {
+    const h = 0.25 + Math.random() * 0.45;
+    const w = 0.06 + Math.random() * 0.07;
+    const mat = new THREE.MeshStandardMaterial({ color: greenShades[Math.floor(Math.random() * greenShades.length)] });
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(w, h, w * 0.5), mat);
+    blade.position.set(
+      (Math.random() - 0.5) * 2.2,
+      h / 2,
+      (Math.random() - 0.5) * 2.2
+    );
+    blade.rotation.y = Math.random() * Math.PI;
+    blade.rotation.z = (Math.random() - 0.5) * 0.4;
+    group.add(blade);
+  }
+  group.position.set(cx, 0, cz);
+  scene.add(group);
+  return group;
+}
+
+function spawnGrassTufts() {
+  const spawnZ = player.position.z - 70;
+  const clusterCount = 3 + Math.floor(Math.random() * 4);
+  for (let i = 0; i < clusterCount; i++) {
+    // Place clusters in the grass zones on both sides
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const cx = side * (roadHalfWidth + 3 + Math.random() * 55);
+    const cz = spawnZ + (Math.random() - 0.5) * 30;
+    grassTufts.push(createGrassTuftCluster(cx, cz));
+  }
+}
+
+function createRoadsideTemple(side, z) {
+  const group = new THREE.Group();
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0x9e8d7a, roughness: 0.95 });
+  const darkMat  = new THREE.MeshStandardMaterial({ color: 0x6b5c4e, roughness: 0.9 });
+  const mossyMat = new THREE.MeshStandardMaterial({ color: 0x5c7545, roughness: 1.0 });
+
+  // Base platform
+  const base = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.25, 3.5), stoneMat);
+  base.position.y = 0.125;
+  group.add(base);
+
+  // Step up
+  const step = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.2, 2.8), stoneMat);
+  step.position.y = 0.35;
+  group.add(step);
+
+  // 4 corner pillars
+  const pillarGeo = new THREE.BoxGeometry(0.28, 1.4, 0.28);
+  [[-1, -1], [-1, 1], [1, -1], [1, 1]].forEach(([px, pz]) => {
+    const p = new THREE.Mesh(pillarGeo, stoneMat);
+    p.position.set(px * 1.0, 0.35 + 0.7, pz * 1.0);
+    group.add(p);
+  });
+
+  // Roof slab (mossy top)
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.2, 3.0), mossyMat);
+  roof.position.y = 0.35 + 1.4 + 0.1;
+  group.add(roof);
+
+  // Small altar stone in center
+  const altar = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.35, 0.7), darkMat);
+  altar.position.y = 0.35 + 0.175;
+  group.add(altar);
+
+  // Candles (2–4 on the platform)
+  const candleCount = 2 + Math.floor(Math.random() * 3);
+  const candlePositions = [
+    [-0.7, -0.7], [0.7, -0.7], [-0.7, 0.7], [0.7, 0.7], [0, 0.5]
+  ];
+  const flameMat = new THREE.MeshStandardMaterial({
+    color: 0xff8800, emissive: 0xff6600, emissiveIntensity: 3,
+    transparent: true, opacity: 0.9
+  });
+  const waxMat = new THREE.MeshStandardMaterial({ color: 0xf0e8c8 });
+  for (let i = 0; i < candleCount; i++) {
+    const [cpx, cpz] = candlePositions[i];
+    const candle = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.35, 6), waxMat);
+    candle.position.set(cpx, 0.35 + 0.175, cpz);
+    group.add(candle);
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.14, 5), flameMat);
+    flame.position.set(cpx, 0.35 + 0.36, cpz);
+    group.add(flame);
+  }
+
+  const xPos = side * (roadHalfWidth + 3.5);
+  group.position.set(xPos, 0, z);
+  scene.add(group);
+  return group;
+}
+
+function spawnRoadsideTemple() {
+  const z = player.position.z - 80;
+  roadsideTemples.push(createRoadsideTemple(nextTempleSide, z));
+  nextTempleSide *= -1;
 }
 
 function spawnTerrainPatches() {
@@ -827,6 +948,10 @@ let maxJumps = 1;
 let jumpsRemaining = 1;
 let spaceWasDown = false;
 let isDead = false;
+let isGiant = false;
+let giantHp = 0;
+let giantMaxHp = 0;
+const GIANT_THRESHOLD = 10; // total Leibs (player + clones) to trigger merge
 const moveSpeed = 0.15;
 const jumpForce = 0.3;
 const gravity = 0.015;
@@ -1019,8 +1144,72 @@ function multiplyPlayer(multiplier) {
 
   const totalCubes = 1 + playerClones.length;
   updatePowerUiLabel();
+
+  // Check if giant threshold reached
+  if (!isGiant && 1 + playerClones.length >= GIANT_THRESHOLD) {
+    activateGiantMode();
+  }
 }
 
+function activateGiantMode() {
+  const mergedCount = playerClones.length;
+
+  // Remove all clones
+  for (const clone of playerClones) {
+    scene.remove(clone);
+  }
+  playerClones.length = 0;
+  cloneMixers.length = 0;
+
+  // Scale up player
+  player.scale.set(1.4, 1.4, 1.4);
+
+  isGiant = true;
+  giantMaxHp = 10; // always 10 hits to shrink back
+  giantHp = 10;
+
+  updatePowerUiLabel();
+  showGiantMessage();
+}
+
+function deactivateGiantMode() {
+  isGiant = false;
+  giantHp = 0;
+  giantMaxHp = 0;
+  player.scale.set(1, 1, 1);
+  updatePowerUiLabel();
+}
+
+function takeDamageGiant() {
+  giantHp--;
+  const s = 1 + 0.04 * giantHp; // 10 hits → 1.4 down to 1.0
+  player.scale.set(s, s, s);
+  updatePowerUiLabel();
+  if (giantHp <= 0) {
+    deactivateGiantMode();
+  }
+}
+
+function showGiantMessage() {
+  const msg = document.createElement('div');
+  msg.textContent = '⚡ GIANT MODE! ⚡';
+  msg.style.cssText = `
+    position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+    font-family:'Courier New',monospace; font-size:42px; font-weight:bold;
+    color:#ffdd00; text-shadow:0 0 20px #ff8800, 0 0 40px #ff4400;
+    z-index:300; pointer-events:none; white-space:nowrap;
+    animation: giantFade 2s ease-out forwards;
+  `;
+  document.body.appendChild(msg);
+  // Inject keyframe if not already present
+  if (!document.getElementById('giant-keyframe')) {
+    const style = document.createElement('style');
+    style.id = 'giant-keyframe';
+    style.textContent = `@keyframes giantFade { 0%{opacity:1;transform:translate(-50%,-50%) scale(1)} 60%{opacity:1;transform:translate(-50%,-60%) scale(1.15)} 100%{opacity:0;transform:translate(-50%,-80%) scale(1.2)} }`;
+    document.head.appendChild(style);
+  }
+  setTimeout(() => msg.remove(), 2000);
+}
 
 
 // Game loop
@@ -1096,7 +1285,7 @@ function animate() {
 
     modelManager.updateAnimation({
       isMoving: isMoving,
-      isGrounded: player.position.y <= 0.5,
+      isGrounded: player.position.y <= 0.5 * player.scale.y,
       isSprinting: isSprinting,
       verticalVelocity: velocity.y,
       isGliding: false,
@@ -1311,10 +1500,13 @@ function animate() {
     const pdx = proj.mesh.position.x - player.position.x;
     const pdy = proj.mesh.position.y - player.position.y;
     const pdz = proj.mesh.position.z - player.position.z;
-    if (Math.sqrt(pdx*pdx + pdy*pdy + pdz*pdz) < 1.0) {
+    const playerHitRadius = isGiant ? 2.5 : 1.0;
+    if (Math.sqrt(pdx*pdx + pdy*pdy + pdz*pdz) < playerHitRadius) {
       scene.remove(proj.mesh);
       enemyProjectiles.splice(i, 1);
-      if (playerClones.length > 0) {
+      if (isGiant) {
+        takeDamageGiant();
+      } else if (playerClones.length > 0) {
         // Absorb the hit with a clone
         const clone = playerClones.pop();
         scene.remove(clone);
@@ -1386,16 +1578,19 @@ function animate() {
     if (destroyed) continue;
 
     // Check if zombie touches player or a clone
-    const targets = [player, ...playerClones];
+    const targets = isGiant ? [player] : [player, ...playerClones];
     for (let t = targets.length - 1; t >= 0; t--) {
       const tgt = targets[t];
       const dx = z.position.x - tgt.position.x;
       const dz2 = z.position.z - tgt.position.z;
-      if (Math.sqrt(dx*dx + dz2*dz2) < 1.2) {
+      const zombieHitRadius = isGiant ? 2.5 : 1.2;
+      if (Math.sqrt(dx*dx + dz2*dz2) < zombieHitRadius) {
         scene.remove(z);
         zombies.splice(i, 1);
         destroyed = true;
-        if (t === 0 && playerClones.length === 0) {
+        if (isGiant) {
+          takeDamageGiant();
+        } else if (t === 0 && playerClones.length === 0) {
           isDead = true;
           showGameOver();
         } else if (t === 0) {
@@ -1500,6 +1695,32 @@ function animate() {
     if (p.mesh.position.z > player.position.z + 30) {
       scene.remove(p.mesh);
       terrainPatches.splice(i, 1);
+    }
+  }
+
+  // Spawn and scroll grass tufts
+  if (Date.now() - lastGrassSpawn > GRASS_SPAWN_INTERVAL) {
+    spawnGrassTufts();
+    lastGrassSpawn = Date.now();
+  }
+  for (let i = grassTufts.length - 1; i >= 0; i--) {
+    grassTufts[i].position.z += roadSpeed;
+    if (grassTufts[i].position.z > player.position.z + 30) {
+      scene.remove(grassTufts[i]);
+      grassTufts.splice(i, 1);
+    }
+  }
+
+  // Spawn and scroll roadside temples
+  if (Date.now() - lastTempleSpawn > TEMPLE_SPAWN_INTERVAL) {
+    spawnRoadsideTemple();
+    lastTempleSpawn = Date.now();
+  }
+  for (let i = roadsideTemples.length - 1; i >= 0; i--) {
+    roadsideTemples[i].position.z += roadSpeed;
+    if (roadsideTemples[i].position.z > player.position.z + 30) {
+      scene.remove(roadsideTemples[i]);
+      roadsideTemples.splice(i, 1);
     }
   }
 
@@ -1613,14 +1834,15 @@ function animate() {
     }
   }
 
-  // Check if on solid ground
+  // Check if on solid ground (snap height scales with player to avoid model clipping into road)
+  const groundSnap = 0.5 * player.scale.y;
   const onGround = isOnSolidGround(player.position.x, player.position.z);
-  if (!onGround && player.position.y <= 0.5) {
+  if (!onGround && player.position.y <= groundSnap) {
     velocity.y = -0.1;
   }
 
-  if (player.position.y <= 0.5 && player.position.y > -0.4 && onGround) {
-    player.position.y = 0.5;
+  if (player.position.y <= groundSnap && player.position.y > -0.4 && onGround) {
+    player.position.y = groundSnap;
     velocity.y = 0;
     isJumping = false;
     jumpsRemaining = maxJumps;
