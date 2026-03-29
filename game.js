@@ -1022,22 +1022,10 @@ const TILT_DEADZONE = 8; // degrees
 
 function setupDeviceOrientation() {
   window.addEventListener('deviceorientation', (e) => {
-    // Use gamma (left/right tilt). On iOS in landscape, Apple remaps axes so gamma
-    // still represents the screen's left/right lean. Android users may need beta,
-    // but gamma works as a reasonable default across devices.
-    const screenAngle = (screen.orientation && screen.orientation.angle != null)
-      ? screen.orientation.angle
-      : (window.orientation || 0);
-
-    let tilt;
-    if (screenAngle === 90) {
-      tilt = (e.beta || 0) - 90;     // landscape-left
-    } else if (screenAngle === -90 || screenAngle === 270) {
-      tilt = -((e.beta || 0) + 90);  // landscape-right
-    } else {
-      tilt = e.gamma || 0;           // portrait / fallback
-    }
-
+    // gamma is the screen-relative left/right tilt (-90 = full left, +90 = full right).
+    // Modern browsers adjust it automatically for screen orientation, so no manual
+    // landscape remapping needed.
+    const tilt = e.gamma || 0;
     tiltLeft  = tilt < -TILT_DEADZONE;
     tiltRight = tilt > TILT_DEADZONE;
   });

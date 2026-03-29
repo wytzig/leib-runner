@@ -176,6 +176,11 @@ canvas {
 #btn-shoot { left: 20px; }
 #btn-jump  { right: 20px; }
 
+@media (orientation: landscape) and (hover: none) and (pointer: coarse) {
+  #btn-shoot { left: 80px; }
+  #btn-jump  { right: 80px; }
+}
+
 /* Show mobile controls on touch screens */
 @media (hover: none) and (pointer: coarse) {
   #mobile-controls       { display: block; }
