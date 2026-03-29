@@ -404,7 +404,7 @@ let nextTurretInterval = 5000;
 // Zombie Leibs — shamble in from the grass toward the road
 const zombies = [];
 const ZOMBIE_HEALTH = 3;
-const ZOMBIE_SPEED = 0.012; // lateral inward speed per frame
+const ZOMBIE_SPEED = 0.018; // tracking speed per frame
 const ZOMBIE_SPAWN_MIN = 3000;
 const ZOMBIE_SPAWN_MAX = 7000;
 let lastZombieSpawn = Date.now();
@@ -972,7 +972,7 @@ for (let i = 0; i < segmentCount; i++) {
 }
 
 // --- Music ---
-const bgMusic = new Audio('Abyss Bounce.wav');
+const bgMusic = new Audio('Leib Weissman Adventure Run.wav');
 bgMusic.loop = true;
 bgMusic.volume = 0.5;
 
@@ -1527,8 +1527,15 @@ function animate() {
     // Scroll with road
     z.position.z += roadSpeed;
 
-    // Shamble inward (toward road center)
-    z.position.x -= z.userData.side * ZOMBIE_SPEED;
+    // Shamble toward Leib
+    const zdx = player.position.x - z.position.x;
+    const zdz = player.position.z - z.position.z;
+    const zdist = Math.sqrt(zdx * zdx + zdz * zdz);
+    if (zdist > 0.1) {
+      z.position.x += (zdx / zdist) * ZOMBIE_SPEED;
+      z.position.z += (zdz / zdist) * ZOMBIE_SPEED;
+      z.rotation.y = Math.atan2(zdx, zdz);
+    }
 
     // Animate legs (rock back and forth)
     z.userData.legPhase += 0.12;
