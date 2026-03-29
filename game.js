@@ -1026,8 +1026,8 @@ function setupDeviceOrientation() {
     // Modern browsers adjust it automatically for screen orientation, so no manual
     // landscape remapping needed.
     const tilt = e.gamma || 0;
-    tiltLeft  = tilt < -TILT_DEADZONE;
-    tiltRight = tilt > TILT_DEADZONE;
+    tiltLeft  = tilt > TILT_DEADZONE;
+    tiltRight = tilt < -TILT_DEADZONE;
   });
 }
 
